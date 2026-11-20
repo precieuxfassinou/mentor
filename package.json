@@ -1,0 +1,9 @@
+{
+  "name": "mentor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal study tutor for an Obsidian vault",
+  "scripts": { "build": "node build.mjs" },
+  "dependencies": { "ts-fsrs": "^6.0.0" },
+  "devDependencies": { "@types/node": "^22.0.0", "esbuild": "^0.28.2", "obsidian": "^1.14.4", "typescript": "^5.9.0" }
+}

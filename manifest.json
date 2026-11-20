@@ -1,0 +1,9 @@
+{
+  "id": "mentor",
+  "name": "Mentor",
+  "version": "0.2.0",
+  "minAppVersion": "1.7.2",
+  "description": "Personal tutor: guided lessons, quizzes and spaced review built from the notes in this vault, powered by the local Claude Code CLI.",
+  "author": "precieuxfassinou",
+  "isDesktopOnly": true
+}
