@@ -1,4 +1,4 @@
-import { createEmptyCard, fsrs, generatorParameters, Rating, State, type Card, type Grade, type FSRS } from 'ts-fsrs';
+import { DefaultScheduler, Rating, State, type DefaultSchedulerCard, type Grade } from 'ts-fsrs';
 import type { Guide } from './prompts';
 
 export type TopicKind = 'note' | 'folder' | 'query';
@@ -32,6 +32,19 @@ export interface StoredCard {
   fsrs: Card;
 }
 
+/** Memory state of a card as saved in data.json (plain JSON, independent of the ts-fsrs version). */
+export interface Card {
+  due: string;
+  state: number;
+  stability: number;
+  difficulty: number;
+  lastReview: string | null;
+  reps: number;
+  lapses: number;
+  scheduledDays: number;
+  learningStep: number;
+}
+
 export interface QuizRecord {
   topicId: string;
   date: string;
@@ -62,30 +75,72 @@ export function topicId(kind: TopicKind, ref: string): string {
   return `${kind}-${(h >>> 0).toString(36)}`;
 }
 
-/** JSON keeps dates as strings: give ts-fsrs real dates back. */
-export function revive(card: Card): Card {
-  return { ...card, due: new Date(card.due), last_review: card.last_review ? new Date(card.last_review) : undefined };
+type LibCard = DefaultSchedulerCard<'FSRS-6'>;
+const STATUS = ['new', 'learning', 'review', 'relearning'] as const;
+const num = (v: unknown, d = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+const iso = (v: unknown): string | null => {
+  if (v instanceof Date) return v.toISOString();
+  if (typeof v !== 'string' || !v) return null;
+  const t = new Date(v);
+  return Number.isNaN(t.getTime()) ? null : t.toISOString();
+};
+
+/** Reads a saved card, including the format of Mentor 1.0.0 (ts-fsrs 5 field names). */
+export function normalizeCard(raw: unknown): Card {
+  const c = (raw ?? {}) as Record<string, unknown>;
+  return {
+    due: iso(c.due) ?? iso(c.dueAt) ?? new Date().toISOString(),
+    state: Math.min(3, Math.max(0, num(c.state))),
+    stability: num(c.stability),
+    difficulty: num(c.difficulty),
+    lastReview: iso(c.lastReview) ?? iso(c.last_review) ?? iso(c.lastReviewAt),
+    reps: num(c.reps),
+    lapses: num(c.lapses),
+    scheduledDays: num(c.scheduledDays, num(c.scheduled_days)),
+    learningStep: num(c.learningStep, num(c.learning_steps)),
+  };
 }
 
+function toLib(c: Card, id: string): LibCard {
+  return {
+    stability: c.stability, difficulty: c.difficulty, state: c.state as State, scheduleStatus: STATUS[c.state] ?? 'new',
+    dueAt: new Date(c.due), lastReviewAt: c.lastReview ? new Date(c.lastReview) : null, cardId: id,
+    reps: c.reps, lapses: c.lapses, scheduledDays: c.scheduledDays, learningStep: c.learningStep,
+  } as LibCard;
+}
+
+function fromLib(c: LibCard): Card {
+  return {
+    due: new Date(c.dueAt).toISOString(), state: c.state, stability: c.stability, difficulty: c.difficulty,
+    lastReview: c.lastReviewAt ? new Date(c.lastReviewAt).toISOString() : null,
+    reps: c.reps, lapses: c.lapses, scheduledDays: c.scheduledDays, learningStep: c.learningStep,
+  };
+}
+
+/** FSRS-6 scheduler (ts-fsrs). Created asynchronously: use Scheduler.create(). */
 export class Scheduler {
-  private f: FSRS;
-  constructor(retention: number) { this.f = fsrs(generatorParameters({ enable_fuzz: true, request_retention: retention })); }
+  private constructor(private s: DefaultScheduler<'FSRS-6'>) {}
 
-  newCard(): Card { return createEmptyCard(new Date()); }
-
-  /** Next interval for each answer, to show on the buttons. */
-  preview(card: Card): Record<Grade, Date> {
-    const p = this.f.repeat(revive(card), new Date());
-    return { [Rating.Again]: p[Rating.Again].card.due, [Rating.Hard]: p[Rating.Hard].card.due, [Rating.Good]: p[Rating.Good].card.due, [Rating.Easy]: p[Rating.Easy].card.due };
+  static async create(retention: number): Promise<Scheduler> {
+    return new Scheduler(await DefaultScheduler({ version: 'FSRS-6', desiredRetention: retention, enableFuzz: true }));
   }
 
-  grade(card: Card, g: Grade): Card { return this.f.next(revive(card), new Date(), g).card; }
+  newCard(): Card { return fromLib(this.s.newCard({ now: new Date() })); }
+
+  /** Next due date for each answer, to show on the buttons. */
+  preview(card: Card): Record<Grade, Date> {
+    const out = {} as Record<Grade, Date>;
+    for (const item of this.s.preview({ card: toLib(card, 'preview'), now: new Date() })) out[item.grade] = new Date(item.card.dueAt);
+    return out;
+  }
+
+  grade(card: Card, g: Grade): Card { return fromLib(this.s.review({ card: toLib(card, 'review'), grade: g, now: new Date() }).card); }
 }
 
 /** Probability of recalling the card right now (FSRS forgetting curve). */
 export function recall(card: Card, now = Date.now()): number | null {
-  if (card.state === State.New || !card.last_review) return null;
-  const t = Math.max(0, (now - new Date(card.last_review).getTime()) / 864e5);
+  if (card.state === State.New || !card.lastReview) return null;
+  const t = Math.max(0, (now - new Date(card.lastReview).getTime()) / 864e5);
   return Math.pow(1 + FACTOR * t / Math.max(card.stability, 0.01), -DECAY);
 }
 
@@ -146,4 +201,4 @@ export function streak(d: MentorData): number {
 }
 
 export { Rating, State };
-export type { Card, Grade };
+export type { Grade };

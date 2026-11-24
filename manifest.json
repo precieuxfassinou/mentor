@@ -1,7 +1,7 @@
 {
   "id": "mentor",
   "name": "Mentor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minAppVersion": "1.7.2",
   "description": "Personal tutor built from your notes: guided lessons, quizzes, timed challenges and spaced review (FSRS). Runs your own local Claude Code.",
   "author": "precieuxfassinou",

@@ -47,7 +47,7 @@
 .mentor-prose { font-family: var(--font-text); font-size: 15px; line-height: 1.6; }
 .mentor-prose > :first-child { margin-top: 0; }
 .mentor-prose > :last-child { margin-bottom: 0; }
-.mentor a.mentor-src { color: var(--m-accent); text-decoration: underline; text-decoration-color: var(--m-accent-soft); text-underline-offset: 3px; }
+.mentor a.mentor-src { color: var(--m-accent); }
 
 /* ---------- panels: Faceless corner ticks */
 .mentor-panel {
@@ -379,7 +379,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   /* the countdown bar keeps its linear shrink: it carries the remaining time, not decoration */
-  .mentor *:not(.mentor-timer-fill), .mentor *::before, .mentor *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+  /* repeated class: more specific than every animated rule above, without !important */
+  .mentor.mentor.mentor *:not(.mentor-timer-fill), .mentor.mentor.mentor *::before, .mentor.mentor.mentor *::after { animation-duration: 1ms; animation-iteration-count: 1; transition-duration: 1ms; }
   .mentor-spark, .mentor-gain { display: none; }
 }
 .mentor-option-t { flex: 1; min-width: 0; }

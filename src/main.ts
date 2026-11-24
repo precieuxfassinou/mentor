@@ -1,6 +1,6 @@
-import { App, FuzzySuggestModal, Notice, Plugin, PluginSettingTab, Setting, TAbstractFile, TFile, TFolder, normalizePath } from 'obsidian';
+import { App, FuzzySuggestModal, Notice, Plugin, PluginSettingTab, Setting, TAbstractFile, TFile, TFolder, normalizePath, type SettingDefinitionItem } from 'obsidian';
 import { ClaudeRunner, detectClaude } from './claude';
-import { EMPTY_DATA, Scheduler, reviewQueue, topicId, uid, type MentorData, type Topic, type TopicKind } from './store';
+import { EMPTY_DATA, Scheduler, normalizeCard, reviewQueue, topicId, uid, type MentorData, type Topic, type TopicKind } from './store';
 import { MentorView, VIEW_TYPE } from './view';
 import { setLanguage, tr, type LangChoice } from './i18n';
 
@@ -38,7 +38,7 @@ export default class MentorPlugin extends Plugin {
   settings: MentorSettings = { ...DEFAULTS };
   data: MentorData = structuredClone(EMPTY_DATA);
   claude = new ClaudeRunner(() => ({ cliPath: this.settings.cliPath, model: this.settings.model }));
-  scheduler = new Scheduler(0.9);
+  scheduler!: Scheduler;
   private status: HTMLElement | null = null;
 
   async onload() {
@@ -49,7 +49,8 @@ export default class MentorPlugin extends Plugin {
     setLanguage(this.settings.language);
     delete (this.settings as unknown as Record<string, unknown>).gradeModel;
     this.data = { ...structuredClone(EMPTY_DATA), ...saved.data };
-    this.scheduler = new Scheduler(this.settings.retention);
+    for (const c of Object.values(this.data.cards)) c.fsrs = normalizeCard(c.fsrs);
+    this.scheduler = await Scheduler.create(this.settings.retention);
 
     this.registerView(VIEW_TYPE, (leaf) => new MentorView(leaf, this));
     this.addRibbonIcon('graduation-cap', 'Mentor', () => void this.open());
@@ -156,26 +157,112 @@ class PickModal extends FuzzySuggestModal<TAbstractFile> {
   onChooseItem(f: TAbstractFile) { this.onPick(f, this.mode); }
 }
 
+const CHOICES = {
+  language: () => ({ auto: tr('Automatique', 'Automatic'), fr: 'Français', en: 'English' }),
+  model: () => ({ sonnet: 'Sonnet', opus: 'Opus' }),
+  retention: () => ({ '0.85': '85 %', '0.9': '90 %', '0.95': '95 %' }),
+  budget: () => ({ '60000': tr('Réduite (60 k)', 'Small (60k)'), '120000': tr('Normale (120 k)', 'Normal (120k)'), '250000': tr('Large (250 k)', 'Large (250k)') }),
+};
+
+const T = {
+  language: () => tr('Langue', 'Language'),
+  languageDesc: () => tr('Automatique : celle d’Obsidian. Recharge le plugin après un changement.', 'Automatic: Obsidian’s language. Reload the plugin after a change.'),
+  cli: () => tr('Chemin de Claude Code', 'Claude Code path'),
+  cliDesc: () => tr('Le programme claude installé sur cet ordinateur. Laisse vide pour le détecter.', 'The claude program installed on this computer. Leave empty to detect it.'),
+  model: () => tr('Modèle', 'Model'),
+  modelDesc: () => tr('Utilisé pour tout : leçons, quiz, corrections et fiches. Sonnet est rapide et très bon pour enseigner ; Opus va plus en profondeur mais répond plus lentement.', 'Used for everything: lessons, quizzes, grading and cards. Sonnet is fast and very good at teaching; Opus goes deeper but answers more slowly.'),
+  learning: () => tr('Apprentissage', 'Learning'),
+  learner: () => tr('Qui apprend', 'About you'),
+  learnerDesc: () => tr('Ton niveau, ta filière, tes projets : Mentor s’en sert pour choisir ses exemples et son niveau d’exigence.', 'Your level, field and projects: Mentor uses them to pick its examples and how demanding to be.'),
+  learnerPh: () => tr('Ex. Étudiant en master génie logiciel, je connais déjà Java et SQL, je prépare un examen…', 'E.g. Software engineering student, I already know Java and SQL, preparing for an exam…'),
+  general: () => tr('Compléter hors des notes', 'Go beyond the notes'),
+  generalDesc: () => tr('Si tes notes sont incomplètes, Mentor peut compléter avec ses connaissances, en le signalant toujours « (hors de tes notes) ».', 'If your notes are incomplete, Mentor can fill gaps with general knowledge, always marked “(not in your notes)”.'),
+  quizSize: () => tr('Questions par quiz', 'Questions per quiz'),
+  newPerDay: () => tr('Nouvelles fiches par jour', 'New cards per day'),
+  newPerDayDesc: () => tr('Au-delà, les nouvelles fiches attendent le lendemain : la révision reste tenable chaque jour.', 'Beyond this, new cards wait for the next day, so daily review stays manageable.'),
+  retention: () => tr('Taux de rappel visé', 'Target retention'),
+  retentionDesc: () => tr('FSRS planifie chaque fiche pour que tu t’en souviennes avec cette probabilité. 90 % est le bon compromis ; plus haut = beaucoup plus de révisions.', 'FSRS schedules each card so you remember it with this probability. 90% is a good balance; higher means many more reviews.'),
+  budget: () => tr('Quantité de notes envoyées', 'Amount of notes sent'),
+  budgetDesc: () => tr('Taille maximale du contexte donné à Claude (en caractères). Plus grand = plus complet mais plus lent.', 'Maximum size of the context given to Claude (in characters). Larger is more complete but slower.'),
+  exclude: () => tr('Dossiers ignorés', 'Ignored folders'),
+  excludeDesc: () => tr('Un par ligne.', 'One per line.'),
+  summary: () => tr('Dossier des synthèses', 'Summaries folder'),
+  summaryDesc: () => tr('Où enregistrer les synthèses de séance quand tu le demandes.', 'Where lesson summaries are saved when you ask for it.'),
+};
+
 class MentorSettingTab extends PluginSettingTab {
   constructor(app: App, private plugin: MentorPlugin) { super(app, plugin); }
 
-  display() {
-    const { containerEl } = this;
-    containerEl.empty();
+  // Declarative settings (Obsidian 1.13+, searchable). display() below stays for older versions.
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    return [
+      { name: T.language(), desc: T.languageDesc(), control: { type: 'dropdown', key: 'language', options: CHOICES.language() } },
+      {
+        type: 'group', heading: 'Claude Code',
+        items: [
+          { name: T.cli(), desc: T.cliDesc(), aliases: ['claude', 'cli'], render: (setting: Setting) => this.cliRow(setting) },
+          { name: T.model(), desc: T.modelDesc(), control: { type: 'dropdown', key: 'model', options: CHOICES.model() } },
+        ],
+      },
+      {
+        type: 'group', heading: T.learning(),
+        items: [
+          { name: T.learner(), desc: T.learnerDesc(), control: { type: 'textarea', key: 'learner', placeholder: T.learnerPh(), rows: 4 } },
+          { name: T.general(), desc: T.generalDesc(), control: { type: 'toggle', key: 'allowGeneral' } },
+          { name: T.quizSize(), control: { type: 'slider', key: 'quizSize', min: 4, max: 20, step: 1 } },
+          { name: T.newPerDay(), desc: T.newPerDayDesc(), control: { type: 'slider', key: 'newPerDay', min: 5, max: 60, step: 5 } },
+          { name: T.retention(), desc: T.retentionDesc(), control: { type: 'dropdown', key: 'retention', options: CHOICES.retention() } },
+        ],
+      },
+      {
+        type: 'group', heading: 'Notes',
+        items: [
+          { name: T.budget(), desc: T.budgetDesc(), control: { type: 'dropdown', key: 'budget', options: CHOICES.budget() } },
+          { name: T.exclude(), desc: T.excludeDesc(), control: { type: 'textarea', key: 'exclude' } },
+          { name: T.summary(), desc: T.summaryDesc(), control: { type: 'text', key: 'summaryFolder' } },
+        ],
+      },
+    ];
+  }
+
+  getControlValue(key: string): unknown {
+    const s = this.plugin.settings;
+    switch (key) {
+      case 'exclude': return s.exclude.join('\n');
+      case 'retention': case 'budget': return String(s[key]);
+      case 'language': case 'model': case 'learner': case 'summaryFolder': case 'allowGeneral': case 'quizSize': case 'newPerDay': return s[key];
+      default: return undefined;
+    }
+  }
+
+  async setControlValue(key: string, value: unknown): Promise<void> {
+    const s = this.plugin.settings;
+    const text = typeof value === 'string' ? value : '';
+    switch (key) {
+      case 'language': if (value === 'auto' || value === 'fr' || value === 'en') s.language = value; break;
+      case 'model': s.model = value === 'opus' ? 'opus' : 'sonnet'; break;
+      case 'learner': s.learner = text; break;
+      case 'allowGeneral': s.allowGeneral = value === true; break;
+      case 'quizSize': case 'newPerDay': if (typeof value === 'number' && Number.isFinite(value)) s[key] = value; break;
+      case 'retention': { const r = Number(value); if ([0.85, 0.9, 0.95].includes(r)) { s.retention = r; this.plugin.scheduler = await Scheduler.create(r); } break; }
+      case 'budget': { const b = Number(value); if (b > 0) s.budget = b; break; }
+      case 'exclude': s.exclude = text.split('\n').map(x => x.trim()).filter(Boolean); break;
+      case 'summaryFolder': s.summaryFolder = text.trim() || 'Mentor'; break;
+      default: return;
+    }
+    await this.plugin.saveAll();
+    if (key === 'newPerDay') this.plugin.updateStatus();
+  }
+
+  /** Path of the claude program, with Detect and Test buttons. */
+  private cliRow(setting: Setting) {
     const s = this.plugin.settings;
     const save = () => this.plugin.saveAll();
-
-    new Setting(containerEl).setName(tr('Langue', 'Language')).setDesc(tr('Automatique : celle d’Obsidian. Recharge le plugin après un changement.', 'Automatic: Obsidian’s language. Reload the plugin after a change.'))
-      .addDropdown(d => d.addOption('auto', tr('Automatique', 'Automatic')).addOption('fr', 'Français').addOption('en', 'English').setValue(s.language)
-        .onChange(async v => { s.language = v as LangChoice; await save(); }));
-
-    new Setting(containerEl).setName('Claude Code').setHeading();
-    const cli = new Setting(containerEl).setName(tr('Chemin de Claude Code', 'Claude Code path'))
-      .setDesc(tr('Le programme claude installé sur cet ordinateur. Laisse vide pour le détecter.', 'The claude program installed on this computer. Leave empty to detect it.'))
+    setting
       .addText(t => t.setPlaceholder(process.platform === 'win32' ? 'C:\\Users\\…\\.local\\bin\\claude.exe' : '~/.local/bin/claude').setValue(s.cliPath).onChange(async v => { s.cliPath = v.trim(); await save(); }))
       .addButton(b => b.setButtonText(tr('Détecter', 'Detect')).onClick(async () => {
         const p = await detectClaude();
-        if (p) { s.cliPath = p; await save(); new Notice(`${tr('Claude Code trouvé : ', 'Claude Code found: ')}${p}`); this.display(); } else new Notice(tr('Claude Code introuvable. Installe-le ou indique son chemin.', 'Claude Code not found. Install it or enter its path.'));
+        if (p) { s.cliPath = p; await save(); new Notice(`${tr('Claude Code trouvé : ', 'Claude Code found: ')}${p}`); this.rerender(); } else new Notice(tr('Claude Code introuvable. Installe-le ou indique son chemin.', 'Claude Code not found. Install it or enter its path.'));
       }))
       .addButton(b => b.setButtonText(tr('Tester', 'Test')).setCta().onClick(async () => {
         b.setDisabled(true); b.setButtonText(tr('Test…', 'Testing…'));
@@ -185,28 +272,41 @@ class MentorSettingTab extends PluginSettingTab {
         } catch (e) { new Notice((e as Error).message, 10000); }
         b.setDisabled(false); b.setButtonText(tr('Tester', 'Test'));
       }));
-    cli.descEl.createDiv({ cls: 'mentor-dim', text: s.cliPath ? `${tr('Actuel : ', 'Current: ')}${s.cliPath}` : tr('Non trouvé pour l’instant.', 'Not found yet.') });
-    new Setting(containerEl).setName(tr('Modèle', 'Model')).setDesc(tr('Utilisé pour tout : leçons, quiz, corrections et fiches. Sonnet est rapide et très bon pour enseigner ; Opus va plus en profondeur mais répond plus lentement.', 'Used for everything: lessons, quizzes, grading and cards. Sonnet is fast and very good at teaching; Opus goes deeper but answers more slowly.'))
-      .addDropdown(d => d.addOption('sonnet', 'Sonnet').addOption('opus', 'Opus').setValue(s.model).onChange(async v => { s.model = v; await save(); }));
+    setting.descEl.createDiv({ cls: 'mentor-dim', text: s.cliPath ? `${tr('Actuel : ', 'Current: ')}${s.cliPath}` : tr('Non trouvé pour l’instant.', 'Not found yet.') });
+  }
 
-    new Setting(containerEl).setName(tr('Apprentissage', 'Learning')).setHeading();
-    new Setting(containerEl).setName(tr('Qui apprend', 'About you')).setDesc(tr('Ton niveau, ta filière, tes projets : Mentor s’en sert pour choisir ses exemples et son niveau d’exigence.', 'Your level, field and projects: Mentor uses them to pick its examples and how demanding to be.'))
-      .addTextArea(t => { t.setPlaceholder(tr('Ex. Étudiant en master génie logiciel, je connais déjà Java et SQL, je prépare un examen…', 'E.g. Software engineering student, I already know Java and SQL, preparing for an exam…')).setValue(s.learner).onChange(async v => { s.learner = v; await save(); }); t.inputEl.rows = 4; });
-    new Setting(containerEl).setName(tr('Compléter hors des notes', 'Go beyond the notes')).setDesc(tr('Si tes notes sont incomplètes, Mentor peut compléter avec ses connaissances, en le signalant toujours « (hors de tes notes) ».', 'If your notes are incomplete, Mentor can fill gaps with general knowledge, always marked “(not in your notes)”.'))
-      .addToggle(t => t.setValue(s.allowGeneral).onChange(async v => { s.allowGeneral = v; await save(); }));
-    new Setting(containerEl).setName(tr('Questions par quiz', 'Questions per quiz'))
-      .addSlider(sl => sl.setLimits(4, 20, 1).setValue(s.quizSize).onChange(async v => { s.quizSize = v; await save(); }));
-    new Setting(containerEl).setName(tr('Nouvelles fiches par jour', 'New cards per day')).setDesc(tr('Au-delà, les nouvelles fiches attendent le lendemain : la révision reste tenable chaque jour.', 'Beyond this, new cards wait for the next day, so daily review stays manageable.'))
-      .addSlider(sl => sl.setLimits(5, 60, 5).setValue(s.newPerDay).onChange(async v => { s.newPerDay = v; await save(); this.plugin.updateStatus(); }));
-    new Setting(containerEl).setName(tr('Taux de rappel visé', 'Target retention')).setDesc(tr('FSRS planifie chaque fiche pour que tu t’en souviennes avec cette probabilité. 90 % est le bon compromis ; plus haut = beaucoup plus de révisions.', 'FSRS schedules each card so you remember it with this probability. 90% is a good balance; higher means many more reviews.'))
-      .addDropdown(d => d.addOption('0.85', '85 %').addOption('0.9', '90 %').addOption('0.95', '95 %').setValue(String(s.retention)).onChange(async v => { s.retention = Number(v); this.plugin.scheduler = new Scheduler(s.retention); await save(); }));
+  /** Obsidian 1.13+: update() re-renders the definitions; older versions: display(). */
+  private rerender() {
+    const tab = this as unknown as { update?: () => void };
+    if (typeof tab.update === 'function') tab.update(); else this.display();
+  }
+
+  /** Fallback for Obsidian versions older than 1.13. */
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+    const s = this.plugin.settings;
+    const dropdown = (setting: Setting, key: keyof typeof CHOICES) => setting.addDropdown(d => {
+      for (const [k, v] of Object.entries(CHOICES[key]())) d.addOption(k, v);
+      d.setValue(String(this.getControlValue(key))).onChange(v => this.setControlValue(key, v));
+    });
+
+    dropdown(new Setting(containerEl).setName(T.language()).setDesc(T.languageDesc()), 'language');
+    new Setting(containerEl).setName('Claude Code').setHeading();
+    this.cliRow(new Setting(containerEl).setName(T.cli()).setDesc(T.cliDesc()));
+    dropdown(new Setting(containerEl).setName(T.model()).setDesc(T.modelDesc()), 'model');
+
+    new Setting(containerEl).setName(T.learning()).setHeading();
+    new Setting(containerEl).setName(T.learner()).setDesc(T.learnerDesc())
+      .addTextArea(t => { t.setPlaceholder(T.learnerPh()).setValue(s.learner).onChange(v => this.setControlValue('learner', v)); t.inputEl.rows = 4; });
+    new Setting(containerEl).setName(T.general()).setDesc(T.generalDesc()).addToggle(t => t.setValue(s.allowGeneral).onChange(v => this.setControlValue('allowGeneral', v)));
+    new Setting(containerEl).setName(T.quizSize()).addSlider(sl => sl.setLimits(4, 20, 1).setValue(s.quizSize).onChange(v => this.setControlValue('quizSize', v)));
+    new Setting(containerEl).setName(T.newPerDay()).setDesc(T.newPerDayDesc()).addSlider(sl => sl.setLimits(5, 60, 5).setValue(s.newPerDay).onChange(v => this.setControlValue('newPerDay', v)));
+    dropdown(new Setting(containerEl).setName(T.retention()).setDesc(T.retentionDesc()), 'retention');
 
     new Setting(containerEl).setName('Notes').setHeading();
-    new Setting(containerEl).setName(tr('Quantité de notes envoyées', 'Amount of notes sent')).setDesc(tr('Taille maximale du contexte donné à Claude (en caractères). Plus grand = plus complet mais plus lent.', 'Maximum size of the context given to Claude (in characters). Larger is more complete but slower.'))
-      .addDropdown(d => d.addOption('60000', tr('Réduite (60 k)', 'Small (60k)')).addOption('120000', tr('Normale (120 k)', 'Normal (120k)')).addOption('250000', tr('Large (250 k)', 'Large (250k)')).setValue(String(s.budget)).onChange(async v => { s.budget = Number(v); await save(); }));
-    new Setting(containerEl).setName(tr('Dossiers ignorés', 'Ignored folders')).setDesc(tr('Un par ligne.', 'One per line.'))
-      .addTextArea(t => t.setValue(s.exclude.join('\n')).onChange(async v => { s.exclude = v.split('\n').map(x => x.trim()).filter(Boolean); await save(); }));
-    new Setting(containerEl).setName(tr('Dossier des synthèses', 'Summaries folder')).setDesc(tr('Où enregistrer les synthèses de séance quand tu le demandes.', 'Where lesson summaries are saved when you ask for it.'))
-      .addText(t => t.setValue(s.summaryFolder).onChange(async v => { s.summaryFolder = v.trim() || 'Mentor'; await save(); }));
+    dropdown(new Setting(containerEl).setName(T.budget()).setDesc(T.budgetDesc()), 'budget');
+    new Setting(containerEl).setName(T.exclude()).setDesc(T.excludeDesc()).addTextArea(t => t.setValue(s.exclude.join('\n')).onChange(v => this.setControlValue('exclude', v)));
+    new Setting(containerEl).setName(T.summary()).setDesc(T.summaryDesc()).addText(t => t.setValue(s.summaryFolder).onChange(v => this.setControlValue('summaryFolder', v)));
   }
 }
