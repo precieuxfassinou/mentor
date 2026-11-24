@@ -1,9 +1,23 @@
 {
   "name": "mentor",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Personal study tutor for an Obsidian vault",
-  "scripts": { "build": "node build.mjs" },
-  "dependencies": { "ts-fsrs": "^6.0.0" },
-  "devDependencies": { "@types/node": "^22.0.0", "esbuild": "^0.28.2", "obsidian": "^1.14.4", "typescript": "^5.9.0" }
+  "version": "1.0.0",
+  "description": "Personal tutor for an Obsidian vault: guided lessons, quizzes and spaced review",
+  "scripts": {
+    "build": "node build.mjs",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "ts-fsrs": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^9.39.5",
+    "eslint-plugin-obsidianmd": "^0.6.0",
+    "obsidian": "^1.14.4",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.74.0"
+  },
+  "author": "precieuxfassinou",
+  "license": "MIT"
 }

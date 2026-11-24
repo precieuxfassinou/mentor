@@ -1,0 +1,39 @@
+name: Release
+
+# Publie une release à chaque nouvelle version dans manifest.json (l'étiquette est créée par la release).
+on:
+  push:
+    branches: [main]
+    paths: ['manifest.json']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: node build.mjs
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/main.js
+            manifest.json
+            styles.css
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          if gh release view "$VERSION" >/dev/null 2>&1; then echo "Release $VERSION already exists"; exit 0; fi
+          gh release create "$VERSION" dist/main.js manifest.json styles.css --target "$GITHUB_SHA" --title "$VERSION" \
+            --notes "Release $VERSION. Install from Obsidian's community plugins, or copy main.js, manifest.json and styles.css into .obsidian/plugins/mentor/."

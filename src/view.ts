@@ -1,12 +1,13 @@
 import { ItemView, MarkdownRenderer, Menu, Notice, TFile, TFolder, WorkspaceLeaf, setIcon } from 'obsidian';
 import type MentorPlugin from './main';
 import {
-  GRADE_SCHEMA, GRADE_SYSTEM, GUIDE_SCHEMA, QUIZ_SCHEMA, WRAP_SCHEMA, challengePrompt, explainPrompt, explainSystem, gradePrompt, guidePrompt, guideSystem,
+  GRADE_SCHEMA, GUIDE_SCHEMA, QUIZ_SCHEMA, WRAP_SCHEMA, challengePrompt, explainPrompt, explainSystem, gradePrompt, gradeSystem, guidePrompt, guideSystem,
   parseTutor, quizPrompt, quizSystem, tutorSystem, tutorTurn, wrapPrompt, wrapSystem,
   type Grade, type Guide, type LessonWrapUp, type QuizQuestion, type Turn,
 } from './prompts';
 import { formatSources, fromFolder, fromNote, fromQuery, type SourceSet } from './sources';
 import { Rating, mastery, nextReview, reviewQueue, streak, today, type Grade as FsrsGrade, type StoredCard, type Topic } from './store';
+import { isFr, locale, plural, tr } from './i18n';
 
 export const VIEW_TYPE = 'mentor-view';
 
@@ -16,9 +17,8 @@ type QuizResult = { q: QuizQuestion; score: number; sure: number; answer: string
 
 const SVG = 'http://www.w3.org/2000/svg';
 const CHALLENGE_SECONDS = 20;
-const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)} %`);
+const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}${isFr() ? ' %' : '%'}`);
 const avg = (l: number[]) => l.reduce((a, b) => a + b, 0) / Math.max(l.length, 1);
-const plural = (n: number, one: string, many: string) => `${n} ${n > 1 ? many : one}`;
 const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
 function fmtInterval(d: Date): string {
@@ -27,20 +27,20 @@ function fmtInterval(d: Date): string {
   const h = Math.round(min / 60);
   if (h < 24) return `${h} h`;
   const days = Math.round(h / 24);
-  if (days < 31) return `${days} j`;
+  if (days < 31) return `${days} ${tr('j', 'd')}`;
   const months = Math.round(days / 30);
-  return months < 12 ? `${months} mois` : `${(days / 365).toFixed(1)} an`;
+  return months < 12 ? `${months} ${tr('mois', 'mo')}` : `${(days / 365).toFixed(1)} ${tr('an', 'y')}`;
 }
 
 function fmtDay(d: Date): string {
   const diff = Math.round((new Date(d.toDateString()).getTime() - new Date(new Date().toDateString()).getTime()) / 864e5);
-  if (diff <= 0) return 'plus tard aujourd’hui';
-  if (diff === 1) return 'demain';
-  return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+  if (diff <= 0) return tr('plus tard aujourd’hui', 'later today');
+  if (diff === 1) return tr('demain', 'tomorrow');
+  return d.toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long' });
 }
 
 function svg<K extends keyof SVGElementTagNameMap>(parent: Element, tag: K, attrs: Record<string, string | number>): SVGElementTagNameMap[K] {
-  const el = document.createElementNS(SVG, tag);
+  const el = activeDocument.createElementNS(SVG, tag);
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
   parent.appendChild(el);
   return el;
@@ -71,7 +71,7 @@ function ring(parent: HTMLElement, value: number | null, size = 44, label?: stri
   arc.setAttribute('stroke-dasharray', `${Math.round((value ?? 0) * 100)} 100`);
   if (value !== null && value < 0.5) arc.classList.add('is-low');
   box.createDiv({ cls: 'mentor-ring-v', text: label ?? (value === null ? '—' : String(Math.round(value * 100))) });
-  box.setAttr('aria-label', `Maîtrise ${pct(value)}`);
+  box.setAttr('aria-label', `${tr('Maîtrise', 'Mastery')} ${pct(value)}`);
   return box;
 }
 
@@ -179,18 +179,18 @@ export class MentorView extends ItemView {
         window.clearInterval(id);
         c.set('wrong');
         txt.empty();
-        txt.createDiv({ cls: 'mentor-waiting-title', text: 'Ça n’a pas marché' });
+        txt.createDiv({ cls: 'mentor-waiting-title', text: tr('Ça n’a pas marché', 'That didn’t work') });
         txt.createDiv({ cls: 'mentor-waiting-detail', text: msg });
         const row = txt.createDiv({ cls: 'mentor-row' });
-        if (retry) this.btn(row, 'Réessayer', { icon: 'rotate-ccw', kind: 'primary', onClick: retry });
-        this.btn(row, 'Accueil', { icon: 'home', kind: 'ghost', onClick: () => this.home() });
+        if (retry) this.btn(row, tr('Réessayer', 'Try again'), { icon: 'rotate-ccw', kind: 'primary', onClick: retry });
+        this.btn(row, tr('Accueil', 'Home'), { icon: 'home', kind: 'ghost', onClick: () => this.home() });
       },
     };
   }
 
   private header(el: HTMLElement, title: string, sub?: string): HTMLElement {
     const bar = el.createDiv({ cls: 'mentor-bar' });
-    const back = bar.createEl('button', { cls: 'mentor-icon-btn', attr: { 'aria-label': 'Retour à l’accueil' } });
+    const back = bar.createEl('button', { cls: 'mentor-icon-btn', attr: { 'aria-label': tr('Retour à l’accueil', 'Back to home') } });
     setIcon(back, 'arrow-left');
     back.onclick = () => this.home();
     const t = bar.createDiv({ cls: 'mentor-bar-title' });
@@ -207,23 +207,23 @@ export class MentorView extends ItemView {
     const head = el.createDiv({ cls: 'mentor-hero' });
     const words = head.createDiv({ cls: 'mentor-hero-words' });
     words.createDiv({ cls: 'mentor-brand', text: 'Mentor' });
-    words.createEl('h1', { cls: 'mentor-title', text: h < 5 || h >= 18 ? 'Bonsoir. Qu’est-ce qu’on apprend ?' : 'Bonjour. Qu’est-ce qu’on apprend ?' });
+    words.createEl('h1', { cls: 'mentor-title', text: h < 5 || h >= 18 ? tr('Bonsoir. Qu’est-ce qu’on apprend ?', 'Good evening. What are we learning?') : h < 12 && !isFr() ? 'Good morning. What are we learning?' : tr('Bonjour. Qu’est-ce qu’on apprend ?', 'Good afternoon. What are we learning?') });
     core(head, 'idle', 64).el.addClass('mentor-hero-core');
 
     const ask = el.createDiv({ cls: 'mentor-panel mentor-ask' });
-    const input = ask.createEl('textarea', { cls: 'mentor-input', attr: { rows: '2', 'aria-label': 'Ce que tu veux apprendre', placeholder: 'Une notion de ton cours, une question… ex. « MapReduce », « différence entre REST et SOAP »' } });
+    const input = ask.createEl('textarea', { cls: 'mentor-input', attr: { rows: '2', 'aria-label': tr('Ce que tu veux apprendre', 'What you want to learn'), placeholder: tr('Une notion de ton cours, une question… ex. « MapReduce », « différence entre REST et SOAP »', 'A notion from your notes, a question… e.g. “MapReduce”, “difference between REST and SOAP”') } });
     const row = ask.createDiv({ cls: 'mentor-row' });
     const go = (mode: Mode) => {
       const q = input.value.trim();
       if (!q) { input.focus(); input.addClass('is-shake'); window.setTimeout(() => input.removeClass('is-shake'), 450); return; }
       void this.startTopic({ kind: 'query', ref: q, title: q }, mode);
     };
-    this.btn(row, 'Leçon guidée', { icon: 'presentation', kind: 'primary', onClick: () => go('lesson') });
+    this.btn(row, tr('Leçon guidée', 'Guided lesson'), { icon: 'presentation', kind: 'primary', onClick: () => go('lesson') });
     this.btn(row, 'Quiz', { icon: 'list-checks', onClick: () => go('quiz') });
-    this.btn(row, 'Défi chrono', { icon: 'timer', onClick: () => go('challenge'), title: 'QCM rapides et chronométrés, pour réviser ce que tu connais déjà' });
+    this.btn(row, tr('Défi chrono', 'Timed challenge'), { icon: 'timer', onClick: () => go('challenge'), title: tr('QCM rapides et chronométrés, pour réviser ce que tu connais déjà', 'Fast timed multiple-choice questions, to rehearse what you already know') });
     row.createDiv({ cls: 'mentor-spacer' });
-    this.btn(row, 'Note ouverte', { icon: 'file-text', kind: 'ghost', onClick: () => this.plugin.pickActive(), title: 'Apprendre la note ouverte et ses notes liées' });
-    this.btn(row, 'Choisir…', { icon: 'folder-search', kind: 'ghost', onClick: () => this.plugin.pickAny(), title: 'Une note ou un dossier de cours' });
+    this.btn(row, tr('Note ouverte', 'Open note'), { icon: 'file-text', kind: 'ghost', onClick: () => this.plugin.pickActive(), title: tr('Apprendre la note ouverte et ses notes liées', 'Learn the open note and its linked notes') });
+    this.btn(row, tr('Choisir…', 'Choose…'), { icon: 'folder-search', kind: 'ghost', onClick: () => this.plugin.pickAny(), title: tr('Une note ou un dossier de cours', 'A note or a folder of notes') });
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); go('lesson'); } });
 
     const queue = reviewQueue(this.data, this.plugin.settings.newPerDay);
@@ -232,18 +232,18 @@ export class MentorView extends ItemView {
     const tt = todayBox.createDiv({ cls: 'mentor-today-txt' });
     const st = streak(this.data);
     if (queue.length) {
-      tt.createDiv({ cls: 'mentor-today-h', text: `${plural(queue.length, 'fiche', 'fiches')} à revoir aujourd’hui` });
-      tt.createDiv({ cls: 'mentor-dim', text: `Environ ${Math.max(1, Math.round(queue.length * 0.4))} min · sujets mélangés${st ? ` · ${plural(st, 'jour', 'jours')} d’affilée` : ''}` });
-      this.btn(todayBox, 'Réviser', { icon: 'play', kind: 'primary', onClick: () => this.review() });
+      tt.createDiv({ cls: 'mentor-today-h', text: `${plural(queue.length, tr('fiche', 'card'), tr('fiches', 'cards'))} ${tr('à revoir aujourd’hui', 'to review today')}` });
+      tt.createDiv({ cls: 'mentor-dim', text: `${tr('Environ', 'About')} ${Math.max(1, Math.round(queue.length * 0.4))} min · ${tr('sujets mélangés', 'mixed topics')}${st ? ` · ${plural(st, tr('jour', 'day'), tr('jours', 'days'))} ${tr('d’affilée', 'in a row')}` : ''}` });
+      this.btn(todayBox, tr('Réviser', 'Review'), { icon: 'play', kind: 'primary', onClick: () => this.review() });
     } else {
       const next = nextReview(this.data);
-      tt.createDiv({ cls: 'mentor-today-h', text: Object.keys(this.data.cards).length ? 'Tout est à jour' : 'Pas encore de fiches' });
-      tt.createDiv({ cls: 'mentor-dim', text: next ? `Prochaine révision ${fmtDay(next.at)} (${plural(next.count, 'fiche', 'fiches')}).${st ? ` ${plural(st, 'jour', 'jours')} d’affilée.` : ''}` : 'Elles se créent à la fin de chaque leçon et après tes quiz.' });
+      tt.createDiv({ cls: 'mentor-today-h', text: Object.keys(this.data.cards).length ? tr('Tout est à jour', 'All caught up') : tr('Pas encore de fiches', 'No cards yet') });
+      tt.createDiv({ cls: 'mentor-dim', text: next ? `${tr('Prochaine révision', 'Next review')} ${fmtDay(next.at)} (${plural(next.count, tr('fiche', 'card'), tr('fiches', 'cards'))}).${st ? ` ${plural(st, tr('jour', 'day'), tr('jours', 'days'))} ${tr('d’affilée', 'in a row')}.` : ''}` : tr('Elles se créent à la fin de chaque leçon et après tes quiz.', 'They are created at the end of each lesson and after your quizzes.') });
     }
 
     const topics = Object.values(this.data.topics).sort((a, b) => (b.lastStudied ?? b.created).localeCompare(a.lastStudied ?? a.created));
     if (!topics.length) { this.howItWorks(el); return; }
-    el.createEl('h2', { cls: 'mentor-h2', text: 'Tes sujets' });
+    el.createEl('h2', { cls: 'mentor-h2', text: tr('Tes sujets', 'Your topics') });
     const list = el.createDiv({ cls: 'mentor-topics' });
     for (const t of topics) this.topicRow(list, t);
     this.howItWorks(el, true);
@@ -256,11 +256,11 @@ export class MentorView extends ItemView {
     const info = item.createDiv({ cls: 'mentor-topic-info' });
     info.createDiv({ cls: 'mentor-topic-title', text: t.title });
     const meta: string[] = [];
-    if (t.lessons) meta.push(plural(t.lessons, 'leçon', 'leçons'));
+    if (t.lessons) meta.push(plural(t.lessons, tr('leçon', 'lesson'), tr('leçons', 'lessons')));
     if (m.lastQuiz) meta.push(`quiz ${m.lastQuiz.score}/${m.lastQuiz.total}`);
-    if (t.bestChallenge) meta.push(`record défi ${t.bestChallenge}`);
-    if (m.cards) meta.push(plural(m.cards, 'fiche', 'fiches'));
-    info.createDiv({ cls: 'mentor-dim', text: meta.join(' · ') || 'Pas encore commencé' });
+    if (t.bestChallenge) meta.push(`${tr('record défi', 'challenge best')} ${t.bestChallenge}`);
+    if (m.cards) meta.push(plural(m.cards, tr('fiche', 'card'), tr('fiches', 'cards')));
+    info.createDiv({ cls: 'mentor-dim', text: meta.join(' · ') || tr('Pas encore commencé', 'Not started yet') });
     const weak = Object.entries(t.concepts).filter(([, v]) => v < 0.6).map(([k]) => k);
     if (weak.length) {
       const chips = info.createDiv({ cls: 'mentor-chips' });
@@ -269,27 +269,27 @@ export class MentorView extends ItemView {
     // One recommended next step; the rest stays one click away.
     const acts = item.createDiv({ cls: 'mentor-topic-acts' });
     const next = !t.lessons ? 'lesson' : m.due ? 'review' : !m.lastQuiz ? 'quiz' : weak.length ? 'focus' : 'challenge';
-    const labels = { lesson: ['Commencer la leçon', 'presentation'], review: [`Réviser (${m.due})`, 'rotate-ccw'], quiz: ['Faire un quiz', 'list-checks'], focus: ['Retravailler les points fragiles', 'target'], challenge: ['Défi chrono', 'timer'] } as const;
+    const labels = { lesson: [tr('Commencer la leçon', 'Start the lesson'), 'presentation'], review: [`${tr('Réviser', 'Review')} (${m.due})`, 'rotate-ccw'], quiz: [tr('Faire un quiz', 'Take a quiz'), 'list-checks'], focus: [tr('Retravailler les points fragiles', 'Work on weak points'), 'target'], challenge: [tr('Défi chrono', 'Timed challenge'), 'timer'] } as const;
     const run = {
       lesson: () => void this.startTopic(t, 'lesson'), review: () => this.review(t.id), quiz: () => void this.startTopic(t, 'quiz', weak),
       focus: () => void this.startTopic(t, 'lesson', weak, true), challenge: () => void this.startTopic(t, 'challenge'),
     };
     this.btn(acts, labels[next][0], { icon: labels[next][1], kind: 'primary', onClick: run[next] });
-    const more = acts.createEl('button', { cls: 'mentor-icon-btn', attr: { 'aria-label': 'Autres actions' } });
+    const more = acts.createEl('button', { cls: 'mentor-icon-btn', attr: { 'aria-label': tr('Autres actions', 'More actions') } });
     setIcon(more, 'more-horizontal');
     more.onclick = (e) => this.topicMenu(e, t, weak, m.cards > 0);
   }
 
   private topicMenu(e: MouseEvent, t: Topic, weak: string[], hasCards: boolean) {
     const menu = new Menu();
-    menu.addItem(i => i.setTitle('Leçon guidée').setIcon('presentation').onClick(() => void this.startTopic(t, 'lesson')));
-    if (t.guide) menu.addItem(i => i.setTitle('Leçon avec un nouveau plan').setIcon('refresh-cw').onClick(() => void this.startTopic(t, 'lesson', weak, true)));
+    menu.addItem(i => i.setTitle(tr('Leçon guidée', 'Guided lesson')).setIcon('presentation').onClick(() => void this.startTopic(t, 'lesson')));
+    if (t.guide) menu.addItem(i => i.setTitle(tr('Leçon avec un nouveau plan', 'Lesson with a new plan')).setIcon('refresh-cw').onClick(() => void this.startTopic(t, 'lesson', weak, true)));
     menu.addItem(i => i.setTitle('Quiz').setIcon('list-checks').onClick(() => void this.startTopic(t, 'quiz', weak)));
-    menu.addItem(i => i.setTitle('Défi chrono').setIcon('timer').onClick(() => void this.startTopic(t, 'challenge', weak)));
-    if (hasCards) menu.addItem(i => i.setTitle('Réviser ses fiches').setIcon('rotate-ccw').onClick(() => this.review(t.id)));
-    if (t.kind !== 'query') menu.addItem(i => i.setTitle('Ouvrir la source').setIcon('file-text').onClick(() => void this.app.workspace.openLinkText(t.ref, '', 'tab')));
+    menu.addItem(i => i.setTitle(tr('Défi chrono', 'Timed challenge')).setIcon('timer').onClick(() => void this.startTopic(t, 'challenge', weak)));
+    if (hasCards) menu.addItem(i => i.setTitle(tr('Réviser ses fiches', 'Review its cards')).setIcon('rotate-ccw').onClick(() => this.review(t.id)));
+    if (t.kind !== 'query') menu.addItem(i => i.setTitle(tr('Ouvrir la source', 'Open the source')).setIcon('file-text').onClick(() => void this.app.workspace.openLinkText(t.ref, '', 'tab')));
     menu.addSeparator();
-    menu.addItem(i => i.setTitle('Retirer ce sujet et ses fiches').setIcon('trash-2').setWarning(true).onClick(async () => {
+    menu.addItem(i => i.setTitle(tr('Retirer ce sujet et ses fiches', 'Remove this topic and its cards')).setIcon('trash-2').setWarning(true).onClick(async () => {
       delete this.data.topics[t.id];
       for (const [id, c] of Object.entries(this.data.cards)) if (c.topicId === t.id) delete this.data.cards[id];
       await this.plugin.saveAll();
@@ -302,15 +302,22 @@ export class MentorView extends ItemView {
   private howItWorks(el: HTMLElement, collapsed = false) {
     const d = el.createEl('details', { cls: 'mentor-how' });
     if (!collapsed) d.setAttr('open', '');
-    d.createEl('summary', { text: collapsed ? 'Comment Mentor t’aide à apprendre' : 'Comment ça marche' });
-    this.md(d.createDiv(), [
+    d.createEl('summary', { text: collapsed ? tr('Comment Mentor t’aide à apprendre', 'How Mentor helps you learn') : tr('Comment ça marche', 'How it works') });
+    this.md(d.createDiv(), (isFr() ? [
       '1. **Leçon guidée.** Mentor prépare un plan à partir de tes notes, te pose une question avant chaque notion (essayer avant d’apprendre aide à retenir), explique avec un exemple concret, puis te fait expliquer ou appliquer. Il passe à la suite quand tu as réussi seul. Un indice, un exemple ou une autre explication sont toujours à un clic.',
       '2. **Quiz.** Surtout des questions où tu rédiges ta réponse, avec ton niveau de confiance. Les erreurs commises en étant sûr de toi sont signalées : ce sont celles qu’on retient le mieux une fois corrigées.',
       '3. **Défi chrono.** Des QCM rapides et chronométrés pour réviser en jouant ce que tu connais déjà.',
       '4. **Révision espacée.** Les fiches reviennent juste avant que tu les oublies (algorithme FSRS, celui d’Anki), sujets mélangés. Quelques minutes par jour suffisent.',
       '',
       'Se tester, espacer ses révisions et s’expliquer les choses : la recherche en sciences cognitives classe ces pratiques parmi les plus efficaces.',
-    ].join('\n'));
+    ] : [
+      '1. **Guided lesson.** Mentor builds a plan from your notes, asks you a question before each notion (trying before learning helps you remember), explains with a concrete example, then has you explain or apply it. It moves on once you have succeeded on your own. A hint, an example or another explanation are always one click away.',
+      '2. **Quiz.** Mostly questions where you write your answer, with your confidence level. Mistakes made while feeling sure are flagged: they are the ones you remember best once corrected.',
+      '3. **Timed challenge.** Fast timed multiple-choice questions to rehearse what you already know, as a game.',
+      '4. **Spaced review.** Cards come back just before you would forget them (the FSRS algorithm, the one Anki uses), with topics mixed. A few minutes a day is enough.',
+      '',
+      'Testing yourself, spacing your reviews and explaining things to yourself: cognitive science research ranks these among the most effective study practices.',
+    ]).join('\n'));
   }
 
   // ================================================================== topics & sources
@@ -318,12 +325,12 @@ export class MentorView extends ItemView {
   async startTopic(ref: { kind: Topic['kind']; ref: string; title: string }, mode: Mode, focus: string[] = [], freshPlan = false) {
     const topic = this.plugin.ensureTopic(ref.kind, ref.ref, ref.title);
     const el = this.reset('loading');
-    this.header(el, topic.title, mode === 'lesson' ? 'Leçon guidée' : mode === 'quiz' ? 'Quiz' : 'Défi chrono');
-    const w = this.waiting(el, 'Je rassemble tes notes…');
+    this.header(el, topic.title, mode === 'lesson' ? tr('Leçon guidée', 'Guided lesson') : mode === 'quiz' ? 'Quiz' : tr('Défi chrono', 'Timed challenge'));
+    const w = this.waiting(el, tr('Je rassemble tes notes…', 'Gathering your notes…'));
     let sources: SourceSet;
     try { sources = await this.collect(topic); } catch (e) { w.fail((e as Error).message); return; }
     if (!sources.files.length) {
-      w.fail('Aucune note de ton vault ne correspond. Essaie avec les mots exacts de ton cours, ou choisis directement une note ou un dossier.');
+      w.fail(tr('Aucune note de ton vault ne correspond. Essaie avec les mots exacts de ton cours, ou choisis directement une note ou un dossier.', 'No note in your vault matches. Try the exact words used in your notes, or pick a note or a folder directly.'));
       return;
     }
     w.done();
@@ -336,12 +343,12 @@ export class MentorView extends ItemView {
     const o = { budget: this.plugin.settings.budget, exclude: this.plugin.settings.exclude };
     if (t.kind === 'note') {
       const f = this.app.vault.getAbstractFileByPath(t.ref);
-      if (!(f instanceof TFile)) throw new Error(`La note « ${t.ref} » n’existe plus.`);
+      if (!(f instanceof TFile)) throw new Error(tr(`La note « ${t.ref} » n’existe plus.`, `The note “${t.ref}” no longer exists.`));
       return fromNote(this.app, f, o);
     }
     if (t.kind === 'folder') {
       const f = this.app.vault.getAbstractFileByPath(t.ref);
-      if (!(f instanceof TFolder)) throw new Error(`Le dossier « ${t.ref} » n’existe plus.`);
+      if (!(f instanceof TFolder)) throw new Error(tr(`Le dossier « ${t.ref} » n’existe plus.`, `The folder “${t.ref}” no longer exists.`));
       return fromFolder(this.app, f, o);
     }
     return fromQuery(this.app, t.ref, o);
@@ -353,24 +360,24 @@ export class MentorView extends ItemView {
 
   private sourcesLine(parent: HTMLElement, s: SourceSet) {
     const line = parent.createDiv({ cls: 'mentor-sources' });
-    line.createSpan({ cls: 'mentor-dim', text: `D’après ${plural(s.files.length, 'note', 'notes')} : ` });
+    line.createSpan({ cls: 'mentor-dim', text: `${tr('D’après', 'Based on')} ${plural(s.files.length, 'note', 'notes')}${tr(' : ', ': ')}` });
     s.files.slice(0, 6).forEach((f, i) => { if (i) line.createSpan({ cls: 'mentor-dim', text: ', ' }); this.link(line, f.path); });
-    if (s.files.length > 6) line.createSpan({ cls: 'mentor-dim', text: ` et ${s.files.length - 6} autres` });
+    if (s.files.length > 6) line.createSpan({ cls: 'mentor-dim', text: ` ${tr('et', 'and')} ${s.files.length - 6} ${tr('autres', 'more')}` });
   }
 
   // ================================================================== guided lesson
 
   private async prepareLesson(topic: Topic, sources: SourceSet, focus: string[], fresh: boolean) {
     const el = this.reset('prep');
-    this.header(el, topic.title, 'Leçon guidée');
+    this.header(el, topic.title, tr('Leçon guidée', 'Guided lesson'));
     let guide = !fresh ? topic.guide : undefined;
     if (!guide) {
-      const w = this.waiting(el, 'Je prépare ta leçon', `À partir de ${plural(sources.files.length, 'note', 'notes')}. Compte une minute environ.`);
+      const w = this.waiting(el, tr('Je prépare ta leçon', 'Preparing your lesson'), `${tr('À partir de', 'From')} ${plural(sources.files.length, 'note', 'notes')}. ${tr('Compte une minute environ.', 'About a minute.')}`);
       this.abort = new AbortController();
       try {
         guide = await this.plugin.claude.json<Guide>({ system: guideSystem(this.ctx(sources)), prompt: guidePrompt(focus), schema: GUIDE_SCHEMA, signal: this.abort.signal });
       } catch (e) { w.fail((e as Error).message, () => void this.prepareLesson(topic, sources, focus, fresh)); return; }
-      if (!guide.concepts?.length) { w.fail('Le plan reçu est vide.', () => void this.prepareLesson(topic, sources, focus, true)); return; }
+      if (!guide.concepts?.length) { w.fail(tr('Le plan reçu est vide.', 'The plan came back empty.'), () => void this.prepareLesson(topic, sources, focus, true)); return; }
       w.done();
       topic.guide = guide;
       topic.guideAt = new Date().toISOString();
@@ -386,7 +393,7 @@ export class MentorView extends ItemView {
     core(top, 'idle', 48);
     const tt = top.createDiv();
     tt.createEl('h2', { cls: 'mentor-plan-title', text: guide.title });
-    tt.createDiv({ cls: 'mentor-dim', text: `${plural(guide.concepts.length, 'notion', 'notions')} · environ ${guide.minutes || guide.concepts.length * 4} min` });
+    tt.createDiv({ cls: 'mentor-dim', text: `${plural(guide.concepts.length, tr('notion', 'concept'), tr('notions', 'concepts'))} · ${tr('environ', 'about')} ${guide.minutes || guide.concepts.length * 4} min` });
     const ol = card.createEl('ol', { cls: 'mentor-plan-list' });
     guide.concepts.forEach((c, i) => {
       const li = ol.createEl('li');
@@ -394,20 +401,20 @@ export class MentorView extends ItemView {
       const known = topic.concepts[c.name];
       const line = li.createDiv({ cls: 'mentor-plan-line' });
       line.createSpan({ cls: 'mentor-plan-name', text: c.name });
-      if (known !== undefined) line.createSpan({ cls: `mentor-chip ${known >= 0.75 ? 'is-ok' : 'is-weak'}`, text: known >= 0.75 ? 'acquis' : 'à revoir' });
+      if (known !== undefined) line.createSpan({ cls: `mentor-chip ${known >= 0.75 ? 'is-ok' : 'is-weak'}`, text: known >= 0.75 ? tr('acquis', 'mastered') : tr('à revoir', 'to review') });
       li.createDiv({ cls: 'mentor-dim', text: c.goal });
     });
     this.sourcesLine(card, sources);
     const row = card.createDiv({ cls: 'mentor-row' });
-    this.btn(row, 'Commencer', { icon: 'play', kind: 'primary', onClick: () => this.lesson(topic, sources, guide) }).focus();
-    if (topic.guideAt) this.btn(row, 'Nouveau plan', { icon: 'refresh-cw', kind: 'ghost', onClick: () => void this.prepareLesson(topic, sources, focus, true), title: 'Refaire le plan à partir de tes notes actuelles' });
+    this.btn(row, tr('Commencer', 'Start'), { icon: 'play', kind: 'primary', onClick: () => this.lesson(topic, sources, guide) }).focus();
+    if (topic.guideAt) this.btn(row, tr('Nouveau plan', 'New plan'), { icon: 'refresh-cw', kind: 'ghost', onClick: () => void this.prepareLesson(topic, sources, focus, true), title: tr('Refaire le plan à partir de tes notes actuelles', 'Rebuild the plan from your current notes') });
   }
 
   private lesson(topic: Topic, sources: SourceSet, guide: Guide) {
     const el = this.reset('lesson');
-    const bar = this.header(el, guide.title, 'Leçon guidée');
+    const bar = this.header(el, guide.title, tr('Leçon guidée', 'Guided lesson'));
     const railBox = bar.createDiv({ cls: 'mentor-railbox' });
-    const rail = railBox.createDiv({ cls: 'mentor-rail', attr: { role: 'list', 'aria-label': 'Plan de la leçon' } });
+    const rail = railBox.createDiv({ cls: 'mentor-rail', attr: { role: 'list', 'aria-label': tr('Plan de la leçon', 'Lesson plan') } });
     const segs = guide.concepts.map((c, i) => rail.createDiv({ cls: 'mentor-rail-seg', attr: { role: 'listitem', title: `${i + 1}. ${c.name}` } }));
     const railLabel = railBox.createDiv({ cls: 'mentor-rail-label' });
     const mastered = new Set<string>();
@@ -425,21 +432,27 @@ export class MentorView extends ItemView {
     const composer = el.createDiv({ cls: 'mentor-composer' });
     const helps = composer.createDiv({ cls: 'mentor-helps' });
     const box = composer.createDiv({ cls: 'mentor-compose-box' });
-    const input = box.createEl('textarea', { cls: 'mentor-input', attr: { rows: '2', 'aria-label': 'Ta réponse', placeholder: 'Ta réponse, avec tes mots… (Entrée pour envoyer)' } });
-    const send = box.createEl('button', { cls: 'mentor-send', attr: { 'aria-label': 'Envoyer' } });
+    const input = box.createEl('textarea', { cls: 'mentor-input', attr: { rows: '2', 'aria-label': tr('Ta réponse', 'Your answer'), placeholder: tr('Ta réponse, avec tes mots… (Entrée pour envoyer)', 'Your answer, in your own words… (Enter to send)') } });
+    const send = box.createEl('button', { cls: 'mentor-send', attr: { 'aria-label': tr('Envoyer', 'Send') } });
     setIcon(send, 'arrow-up');
     const foot = composer.createDiv({ cls: 'mentor-row mentor-compose-foot' });
-    foot.createSpan({ cls: 'mentor-dim', text: 'Maj+Entrée : nouvelle ligne' });
+    foot.createSpan({ cls: 'mentor-dim', text: tr('Maj+Entrée : nouvelle ligne', 'Shift+Enter: new line') });
     foot.createDiv({ cls: 'mentor-spacer' });
     const transcript: Turn[] = [];
-    const finish = this.btn(foot, 'Terminer la leçon', { icon: 'flag', kind: 'ghost', onClick: () => void this.wrapUp(topic, sources, transcript) });
+    const finish = this.btn(foot, tr('Terminer la leçon', 'End the lesson'), { icon: 'flag', kind: 'ghost', onClick: () => void this.wrapUp(topic, sources, transcript) });
 
-    const HELP: [string, string, string][] = [
+    const HELP: [string, string, string][] = isFr() ? [
       ['Un indice', 'lightbulb', 'Donne-moi un indice, sans la réponse.'],
       ['Un exemple', 'box', 'Montre-moi un exemple concret.'],
       ['Explique autrement', 'refresh-cw', 'Je ne comprends pas encore. Explique autrement, plus simplement.'],
       ['Je ne sais pas', 'help-circle', 'Je ne sais pas.'],
       ['Je connais déjà', 'fast-forward', 'Je connais déjà cette notion : teste-moi directement avec une question plus difficile.'],
+    ] : [
+      ['A hint', 'lightbulb', 'Give me a hint, without the answer.'],
+      ['An example', 'box', 'Show me a concrete example.'],
+      ['Explain differently', 'refresh-cw', 'I don’t get it yet. Explain it differently, more simply.'],
+      ['I don’t know', 'help-circle', 'I don’t know.'],
+      ['I already know this', 'fast-forward', 'I already know this concept: test me directly with a harder question.'],
     ];
     const helpBtns = HELP.map(([label, icon, msg]) => this.btn(helps, label, { icon, kind: 'ghost', onClick: () => void submit(msg, label) }));
 
@@ -457,7 +470,7 @@ export class MentorView extends ItemView {
       setBusy(true);
       const m = log.createDiv({ cls: 'mentor-msg is-tutor' });
       const c = core(m.createDiv({ cls: 'mentor-msg-av' }), 'thinking', 28);
-      const body = m.createDiv({ cls: 'mentor-msg-body is-pending', text: 'Mentor réfléchit…' });
+      const body = m.createDiv({ cls: 'mentor-msg-body is-pending', text: tr('Mentor réfléchit…', 'Mentor is thinking…') });
       scroll();
       this.abort = new AbortController();
       let last = 0;
@@ -480,13 +493,13 @@ export class MentorView extends ItemView {
         for (const n of p.mastered ?? []) mastered.add(n);
         if (p.step) setStep(p.step);
         if (mastered.size > before) { c.set('ok'); burst(m.querySelector('.mentor-msg-av') as HTMLElement); } else c.set('idle');
-        if (p.done) { segs.forEach(s => s.addClass('is-done')); railLabel.setText('Clôture'); finish.removeClass('is-ghost'); finish.addClass('is-primary'); }
+        if (p.done) { segs.forEach(s => s.addClass('is-done')); railLabel.setText(tr('Clôture', 'Wrap-up')); finish.removeClass('is-ghost'); finish.addClass('is-primary'); }
       } catch (e) {
         c.set('wrong');
         body.removeClass('is-pending');
         body.empty();
         body.createDiv({ cls: 'mentor-error', text: (e as Error).message });
-        this.btn(body, 'Réessayer', { icon: 'rotate-ccw', onClick: () => { m.remove(); void tutor(); } });
+        this.btn(body, tr('Réessayer', 'Try again'), { icon: 'rotate-ccw', onClick: () => { m.remove(); void tutor(); } });
       } finally {
         setBusy(false);
         input.focus();
@@ -516,8 +529,8 @@ export class MentorView extends ItemView {
 
   private async wrapUp(topic: Topic, sources: SourceSet, transcript: Turn[]) {
     const el = this.reset('wrap');
-    this.header(el, topic.title, 'Fin de la leçon');
-    const w = this.waiting(el, 'Je prépare ta synthèse et tes fiches', 'Une petite minute.');
+    this.header(el, topic.title, tr('Fin de la leçon', 'End of lesson'));
+    const w = this.waiting(el, tr('Je prépare ta synthèse et tes fiches', 'Preparing your summary and cards'), tr('Une petite minute.', 'Just a minute.'));
     this.abort = new AbortController();
     let res: LessonWrapUp;
     try {
@@ -533,25 +546,25 @@ export class MentorView extends ItemView {
     core(cbox, 'ok', 64);
     burst(cbox, true);
     const tt = top.createDiv();
-    tt.createEl('h2', { cls: 'mentor-result-h', text: 'Leçon terminée' });
-    tt.createDiv({ cls: 'mentor-dim', text: added ? `${plural(added, 'fiche ajoutée', 'fiches ajoutées')} à ta révision. Première révision demain : c’est l’espacement qui fixe ce que tu viens d’apprendre.` : 'Ces notions sont déjà dans tes fiches.' });
+    tt.createEl('h2', { cls: 'mentor-result-h', text: tr('Leçon terminée', 'Lesson complete') });
+    tt.createDiv({ cls: 'mentor-dim', text: added ? `${plural(added, tr('fiche ajoutée', 'card added'), tr('fiches ajoutées', 'cards added'))} ${tr('à ta révision. Première révision demain : c’est l’espacement qui fixe ce que tu viens d’apprendre.', 'to your reviews. First review tomorrow: spacing is what makes what you just learned stick.')}` : tr('Ces notions sont déjà dans tes fiches.', 'These concepts are already in your cards.') });
 
     if (res.assessment?.length) this.conceptBars(el, res.assessment.map(a => [a.concept, a.score]));
 
     const weak = (res.assessment ?? []).filter(a => a.score < 0.75).map(a => a.concept);
     const row = el.createDiv({ cls: 'mentor-row' });
-    this.btn(row, 'Faire un quiz maintenant', { icon: 'list-checks', kind: 'primary', onClick: () => void this.quiz(topic, sources, weak) });
-    this.btn(row, 'Enregistrer la synthèse', { icon: 'save', onClick: async () => {
+    this.btn(row, tr('Faire un quiz maintenant', 'Take a quiz now'), { icon: 'list-checks', kind: 'primary', onClick: () => void this.quiz(topic, sources, weak) });
+    this.btn(row, tr('Enregistrer la synthèse', 'Save the summary'), { icon: 'save', onClick: () => void (async () => {
       const file = await this.plugin.saveSummary(topic, res.summary);
-      if (file) { new Notice(`Synthèse enregistrée : ${file.path}`); void this.app.workspace.getLeaf('tab').openFile(file); }
-    } });
-    this.btn(row, 'Accueil', { icon: 'home', kind: 'ghost', onClick: () => this.home() });
+      if (file) { new Notice(`${tr('Synthèse enregistrée : ', 'Summary saved: ')}${file.path}`); void this.app.workspace.getLeaf('tab').openFile(file); }
+    })() });
+    this.btn(row, tr('Accueil', 'Home'), { icon: 'home', kind: 'ghost', onClick: () => this.home() });
 
     const sum = el.createEl('details', { cls: 'mentor-panel mentor-fold' });
-    sum.createEl('summary', { text: 'Synthèse de la leçon' });
+    sum.createEl('summary', { text: tr('Synthèse de la leçon', 'Lesson summary') });
     this.md(sum.createDiv({ cls: 'mentor-prose' }), res.summary, sources.files[0]?.path ?? '');
     const cards = el.createEl('details', { cls: 'mentor-panel mentor-fold' });
-    cards.createEl('summary', { text: `Les fiches (${res.cards.length})` });
+    cards.createEl('summary', { text: `${tr('Les fiches', 'The cards')} (${res.cards.length})` });
     for (const c of res.cards) {
       const card = cards.createDiv({ cls: 'mentor-card-mini' });
       card.createDiv({ cls: 'mentor-card-q', text: c.front });
@@ -595,7 +608,7 @@ export class MentorView extends ItemView {
           window.setTimeout(() => pop.remove(), 1100);
         }
         series.empty();
-        if (run >= 3) { series.setText(`Série ×${run}`); series.removeClass('is-on'); void series.offsetWidth; series.addClass('is-on'); }
+        if (run >= 3) { series.setText(`${tr('Série', 'Streak')} ×${run}`); series.removeClass('is-on'); void series.offsetWidth; series.addClass('is-on'); }
         else series.removeClass('is-on');
         return { gain, run, mult };
       },
@@ -606,7 +619,7 @@ export class MentorView extends ItemView {
     const el = this.reset('quiz');
     const bar = this.header(el, topic.title, 'Quiz');
     const stage = el.createDiv({ cls: 'mentor-stage' });
-    const w = this.waiting(stage, 'Je prépare tes questions', `${plural(this.plugin.settings.quizSize, 'question', 'questions')} à partir de ${plural(sources.files.length, 'note', 'notes')}. Compte une minute environ.`);
+    const w = this.waiting(stage, tr('Je prépare tes questions', 'Preparing your questions'), `${plural(this.plugin.settings.quizSize, 'question', 'questions')} ${tr('à partir de', 'from')} ${plural(sources.files.length, 'note', 'notes')}. ${tr('Compte une minute environ.', 'About a minute.')}`);
     this.abort = new AbortController();
     let questions: QuizQuestion[];
     try {
@@ -615,7 +628,7 @@ export class MentorView extends ItemView {
       });
       questions = (r.questions ?? []).filter(q => q.question && q.answer);
     } catch (e) { w.fail((e as Error).message, () => void this.quiz(topic, sources, focus)); return; }
-    if (!questions.length) { w.fail('Aucune question reçue.', () => void this.quiz(topic, sources, focus)); return; }
+    if (!questions.length) { w.fail(tr('Aucune question reçue.', 'No questions came back.'), () => void this.quiz(topic, sources, focus)); return; }
     w.done();
 
     const dots = bar.createDiv({ cls: 'mentor-dots' });
@@ -631,7 +644,7 @@ export class MentorView extends ItemView {
       dotEls.forEach((d, k) => d.toggleClass('is-current', k === i));
       const q = questions[i];
       const card = stage.createDiv({ cls: 'mentor-panel mentor-q mentor-enter' });
-      card.createDiv({ cls: 'mentor-q-meta', text: `Question ${i + 1} sur ${questions.length} · ${q.type === 'mcq' ? 'choix multiple' : q.type === 'apply' ? 'application' : 'explication'} · ${q.concept}` });
+      card.createDiv({ cls: 'mentor-q-meta', text: `Question ${i + 1} ${tr('sur', 'of')} ${questions.length} · ${q.type === 'mcq' ? tr('choix multiple', 'multiple choice') : q.type === 'apply' ? tr('application', 'apply') : tr('explication', 'explain')} · ${q.concept}` });
       this.md(card.createDiv({ cls: 'mentor-q-text' }), q.question, q.source);
 
       let choice = -1;
@@ -650,28 +663,28 @@ export class MentorView extends ItemView {
           };
         });
       } else {
-        input = card.createEl('textarea', { cls: 'mentor-input', attr: { rows: '4', 'aria-label': 'Ta réponse', placeholder: 'Rédige ta réponse avec tes mots, même incomplète.' } });
+        input = card.createEl('textarea', { cls: 'mentor-input', attr: { rows: '4', 'aria-label': tr('Ta réponse', 'Your answer'), placeholder: tr('Rédige ta réponse avec tes mots, même incomplète.', 'Write your answer in your own words, even if incomplete.') } });
         window.setTimeout(() => input?.focus(), 60);
       }
 
       const conf = card.createDiv({ cls: 'mentor-conf' });
-      conf.createSpan({ cls: 'mentor-dim', text: 'Tu es sûr de toi ?' });
-      const seg = conf.createDiv({ cls: 'mentor-seg', attr: { role: 'radiogroup', 'aria-label': 'Confiance' } });
+      conf.createSpan({ cls: 'mentor-dim', text: tr('Tu es sûr de toi ?', 'How sure are you?') });
+      const seg = conf.createDiv({ cls: 'mentor-seg', attr: { role: 'radiogroup', 'aria-label': tr('Confiance', 'Confidence') } });
       let sure = -1;
-      ['Je devine', 'Plutôt', 'Certain'].forEach((l, k) => {
+      (isFr() ? ['Je devine', 'Plutôt', 'Certain'] : ['Guessing', 'Fairly', 'Certain']).forEach((l, k) => {
         const b = seg.createEl('button', { cls: 'mentor-seg-btn', text: l, attr: { role: 'radio', 'aria-checked': 'false' } });
         b.onclick = () => { sure = k; seg.querySelectorAll('button').forEach(x => { x.removeClass('is-picked'); x.setAttr('aria-checked', 'false'); }); b.addClass('is-picked'); b.setAttr('aria-checked', 'true'); hint.setText(''); };
       });
       const hint = card.createDiv({ cls: 'mentor-hint' });
 
       const row = card.createDiv({ cls: 'mentor-row' });
-      const validate = this.btn(row, 'Valider', { icon: 'check', kind: 'primary', onClick: () => void check() });
-      const skip = this.btn(row, 'Je ne sais pas', { kind: 'ghost', onClick: () => { if (input) input.value = ''; choice = -2; sure = 0; void check(); } });
+      const validate = this.btn(row, tr('Valider', 'Submit'), { icon: 'check', kind: 'primary', onClick: () => void check() });
+      const skip = this.btn(row, tr('Je ne sais pas', 'I don’t know'), { kind: 'ghost', onClick: () => { if (input) input.value = ''; choice = -2; sure = 0; void check(); } });
       const fb = stage.createDiv({ cls: 'mentor-feedback' });
 
       // Keyboard: A-D or 1-4 to choose, Ctrl+Entrée to validate.
       this.onKeys((e) => {
-        if (document.activeElement === input) return;
+        if (activeDocument.activeElement === input) return;
         const k = 'abcd'.indexOf(e.key.toLowerCase());
         const n = Number(e.key) - 1;
         const idx = k >= 0 ? k : n >= 0 && n < 4 ? n : -1;
@@ -680,8 +693,8 @@ export class MentorView extends ItemView {
 
       const check = async () => {
         const answer = input ? input.value.trim() : choice >= 0 ? q.options![choice] : '';
-        if (choice !== -2 && !answer) { hint.setText('Écris ou choisis une réponse, même incertaine : se tromper fait partie de l’apprentissage.'); input?.focus(); return; }
-        if (sure < 0) { hint.setText('Indique d’abord ta confiance : ça permet de repérer les fausses certitudes.'); seg.addClass('is-shake'); window.setTimeout(() => seg.removeClass('is-shake'), 450); return; }
+        if (choice !== -2 && !answer) { hint.setText(tr('Écris ou choisis une réponse, même incertaine : se tromper fait partie de l’apprentissage.', 'Write or pick an answer, even an unsure one: getting it wrong is part of learning.')); input?.focus(); return; }
+        if (sure < 0) { hint.setText(tr('Indique d’abord ta confiance : ça permet de repérer les fausses certitudes.', 'Pick your confidence first: it helps spot false certainties.')); seg.addClass('is-shake'); window.setTimeout(() => seg.removeClass('is-shake'), 450); return; }
         validate.disabled = true; skip.disabled = true;
         if (input) input.disabled = true;
         card.querySelectorAll('.mentor-option, .mentor-seg-btn').forEach(b => ((b as HTMLButtonElement).disabled = true));
@@ -694,19 +707,19 @@ export class MentorView extends ItemView {
         let grade: Grade;
         if (q.type === 'mcq' && q.options?.length && typeof q.correct === 'number') {
           const ok = choice === q.correct;
-          grade = { score: ok ? 1 : 0, verdict: ok ? 'Juste' : 'Pas encore', feedback: ok ? q.answer : `La bonne réponse était **${String.fromCharCode(65 + q.correct)}**. ${q.answer}`, missing: ok ? [] : q.keyPoints };
+          grade = { score: ok ? 1 : 0, verdict: ok ? tr('Juste', 'Right') : tr('Pas encore', 'Not yet'), feedback: ok ? q.answer : `${tr('La bonne réponse était', 'The right answer was')} **${String.fromCharCode(65 + q.correct)}**. ${q.answer}`, missing: ok ? [] : q.keyPoints };
           opts?.querySelectorAll('.mentor-option').forEach((b, k) => { if (k === q.correct) b.addClass('is-right'); else if (k === choice) b.addClass('is-wrongpick'); else b.addClass('is-faded'); });
         } else if (!answer) {
-          grade = { score: 0, verdict: 'À apprendre', feedback: q.answer, missing: q.keyPoints };
+          grade = { score: 0, verdict: tr('À apprendre', 'To learn'), feedback: q.answer, missing: q.keyPoints };
         } else {
-          fbBody.createDiv({ cls: 'mentor-dim', text: 'Mentor corrige ta réponse…' });
+          fbBody.createDiv({ cls: 'mentor-dim', text: tr('Mentor corrige ta réponse…', 'Mentor is grading your answer…') });
           try {
-            grade = await this.plugin.claude.json<Grade>({ system: GRADE_SYSTEM, prompt: gradePrompt(q, answer, sure), schema: GRADE_SCHEMA });
+            grade = await this.plugin.claude.json<Grade>({ system: gradeSystem(), prompt: gradePrompt(q, answer, sure), schema: GRADE_SCHEMA });
           } catch (e) {
             c.set('wrong');
             fbBody.empty();
             fbBody.createDiv({ cls: 'mentor-error', text: (e as Error).message });
-            this.btn(fbBody, 'Réessayer la correction', { icon: 'rotate-ccw', onClick: () => { void check(); } });
+            this.btn(fbBody, tr('Réessayer la correction', 'Retry grading'), { icon: 'rotate-ccw', onClick: () => { void check(); } });
             validate.disabled = false; skip.disabled = false;
             return;
           }
@@ -722,28 +735,28 @@ export class MentorView extends ItemView {
         fbBody.empty();
         const head = fbBody.createDiv({ cls: 'mentor-fb-head' });
         head.createSpan({ cls: 'mentor-fb-verdict', text: grade.verdict });
-        if (s.gain) head.createSpan({ cls: 'mentor-fb-pts', text: `+${s.gain}${s.mult > 1 ? ` (série ×${s.run})` : ''}` });
-        if (sure === 2 && grade.score < 1) head.createSpan({ cls: 'mentor-chip is-weak', text: 'Tu étais sûr de toi : retiens bien celle-ci' });
+        if (s.gain) head.createSpan({ cls: 'mentor-fb-pts', text: `+${s.gain}${s.mult > 1 ? ` (${tr('série', 'streak')} ×${s.run})` : ''}` });
+        if (sure === 2 && grade.score < 1) head.createSpan({ cls: 'mentor-chip is-weak', text: tr('Tu étais sûr de toi : retiens bien celle-ci', 'You were sure: remember this one') });
         this.md(fbBody.createDiv({ cls: 'mentor-prose' }), grade.feedback, q.source);
         if (q.type !== 'mcq' && grade.score < 1) {
           const model = fbBody.createEl('details', { cls: 'mentor-model' });
-          model.createEl('summary', { text: 'Voir la réponse modèle' });
+          model.createEl('summary', { text: tr('Voir la réponse modèle', 'See the model answer') });
           this.md(model.createDiv({ cls: 'mentor-prose' }), q.answer, q.source);
         }
         const src = fbBody.createDiv({ cls: 'mentor-dim' });
-        src.createSpan({ text: 'Dans ta note ' });
+        src.createSpan({ text: tr('Dans ta note ', 'In your note ') });
         this.link(src, q.source);
         const actions = fbBody.createDiv({ cls: 'mentor-row' });
-        const next = this.btn(actions, i + 1 < questions.length ? 'Question suivante' : 'Voir le bilan', { icon: 'arrow-right', kind: 'primary', onClick: () => { i++; show(); } });
+        const next = this.btn(actions, i + 1 < questions.length ? tr('Question suivante', 'Next question') : tr('Voir le bilan', 'See results'), { icon: 'arrow-right', kind: 'primary', onClick: () => { i++; show(); } });
         if (grade.score < 1) {
-          const ex = this.btn(actions, 'Explique-moi', { icon: 'message-circle', onClick: async () => {
+          const ex = this.btn(actions, tr('Explique-moi', 'Explain it to me'), { icon: 'message-circle', onClick: () => void (async () => {
             ex.disabled = true;
-            const out = fbBody.createDiv({ cls: 'mentor-explain mentor-prose', text: 'Mentor prépare une explication…' });
+            const out = fbBody.createDiv({ cls: 'mentor-explain mentor-prose', text: tr('Mentor prépare une explication…', 'Mentor is preparing an explanation…') });
             try {
               const r = await this.plugin.claude.run({ system: explainSystem(ctx), prompt: explainPrompt(q, answer), onText: (t) => out.setText(t) });
               this.md(out, r.text, q.source);
             } catch (e2) { out.setText((e2 as Error).message); ex.disabled = false; }
-          } });
+          })() });
         }
         next.focus();
         fb.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'nearest' });
@@ -755,7 +768,7 @@ export class MentorView extends ItemView {
 
   private async quizEnd(topic: Topic, sources: SourceSet, results: QuizResult[], points: number) {
     const el = this.reset('quiz-end');
-    this.header(el, topic.title, 'Bilan du quiz');
+    this.header(el, topic.title, tr('Bilan du quiz', 'Quiz results'));
     const total = results.length;
     const score = results.reduce((a, r) => a + r.score, 0);
     const over = results.filter(r => r.sure === 2 && r.score < 1);
@@ -773,15 +786,19 @@ export class MentorView extends ItemView {
     r.addClass('is-animated');
     if (ratio >= 0.6) window.setTimeout(() => burst(rbox, ratio >= 0.85), 500);
     const tt = top.createDiv();
-    tt.createEl('h2', { cls: 'mentor-result-h', text: ratio >= 0.85 ? 'Très solide' : ratio >= 0.6 ? 'Bonne base, quelques trous' : 'Ça se travaille, et on sait par où commencer' });
+    tt.createEl('h2', { cls: 'mentor-result-h', text: ratio >= 0.85 ? tr('Très solide', 'Very solid') : ratio >= 0.6 ? tr('Bonne base, quelques trous', 'Good base, a few gaps') : tr('Ça se travaille, et on sait par où commencer', 'Work to do, and now you know where to start') });
     const pts = tt.createDiv({ cls: 'mentor-result-pts' });
     const ptsV = pts.createSpan({ text: '0' });
     pts.createSpan({ cls: 'mentor-dim', text: ' points' });
     countTo(ptsV, 0, points, 1100);
     const lines: string[] = [];
-    if (over.length) lines.push(`${plural(over.length, 'réponse donnée', 'réponses données')} comme certaine${over.length > 1 ? 's' : ''} mais fausse${over.length > 1 ? 's' : ''}. Ce sont les erreurs qu’on corrige le mieux : elles passent en tête de tes fiches.`);
-    if (under) lines.push(`${plural(under, 'bonne réponse donnée', 'bonnes réponses données')} en devinant : tu en sais plus que tu ne le crois.`);
-    if (!lines.length) lines.push('Ta confiance correspond bien à ce que tu sais.');
+    if (over.length) lines.push(isFr()
+      ? `${plural(over.length, 'réponse donnée', 'réponses données')} comme certaine${over.length > 1 ? 's' : ''} mais fausse${over.length > 1 ? 's' : ''}. Ce sont les erreurs qu’on corrige le mieux : elles passent en tête de tes fiches.`
+      : `${plural(over.length, 'answer', 'answers')} given as certain but wrong. These are the mistakes you correct best: they go to the top of your cards.`);
+    if (under) lines.push(isFr()
+      ? `${plural(under, 'bonne réponse donnée', 'bonnes réponses données')} en devinant : tu en sais plus que tu ne le crois.`
+      : `${plural(under, 'right answer', 'right answers')} given while guessing: you know more than you think.`);
+    if (!lines.length) lines.push(tr('Ta confiance correspond bien à ce que tu sais.', 'Your confidence matches what you know.'));
     for (const l of lines) tt.createDiv({ cls: 'mentor-dim', text: l });
 
     this.conceptBars(el, [...byConcept].map(([c, l]) => [c, avg(l)]));
@@ -793,24 +810,24 @@ export class MentorView extends ItemView {
         front: x.q.question + (x.q.type === 'mcq' && x.q.options ? '\n\n' + x.q.options.map((o, k) => `${String.fromCharCode(65 + k)}. ${o}`).join('\n') : ''),
         back: x.q.answer, concept: x.q.concept, source: x.q.source,
       })));
-      el.createDiv({ cls: 'mentor-dim', text: `${plural(missed.length, 'question manquée ajoutée', 'questions manquées ajoutées')} à tes fiches de révision.` });
+      el.createDiv({ cls: 'mentor-dim', text: `${plural(missed.length, tr('question manquée ajoutée', 'missed question added'), tr('questions manquées ajoutées', 'missed questions added'))} ${tr('à tes fiches de révision.', 'to your review cards.')}` });
     }
     await this.plugin.saveAll();
     const row = el.createDiv({ cls: 'mentor-row' });
-    if (weak.length) this.btn(row, 'Leçon sur les points fragiles', { icon: 'target', kind: 'primary', onClick: () => void this.prepareLesson(topic, sources, weak, true) });
-    else this.btn(row, 'Défi chrono', { icon: 'timer', kind: 'primary', onClick: () => void this.challenge(topic, sources, []) });
-    this.btn(row, 'Nouveau quiz', { icon: 'refresh-cw', onClick: () => void this.quiz(topic, sources, weak) });
-    this.btn(row, 'Accueil', { icon: 'home', kind: 'ghost', onClick: () => this.home() });
+    if (weak.length) this.btn(row, tr('Leçon sur les points fragiles', 'Lesson on the weak points'), { icon: 'target', kind: 'primary', onClick: () => void this.prepareLesson(topic, sources, weak, true) });
+    else this.btn(row, tr('Défi chrono', 'Timed challenge'), { icon: 'timer', kind: 'primary', onClick: () => void this.challenge(topic, sources, []) });
+    this.btn(row, tr('Nouveau quiz', 'New quiz'), { icon: 'refresh-cw', onClick: () => void this.quiz(topic, sources, weak) });
+    this.btn(row, tr('Accueil', 'Home'), { icon: 'home', kind: 'ghost', onClick: () => this.home() });
   }
 
   // ================================================================== timed challenge (Kahoot-style)
 
   private async challenge(topic: Topic, sources: SourceSet, focus: string[]) {
     const el = this.reset('challenge');
-    const bar = this.header(el, topic.title, 'Défi chrono');
+    const bar = this.header(el, topic.title, tr('Défi chrono', 'Timed challenge'));
     const stage = el.createDiv({ cls: 'mentor-stage' });
     const n = Math.max(8, this.plugin.settings.quizSize);
-    const w = this.waiting(stage, 'Je prépare ton défi', `${n} QCM rapides, ${CHALLENGE_SECONDS} secondes chacun.`);
+    const w = this.waiting(stage, tr('Je prépare ton défi', 'Preparing your challenge'), tr(`${n} QCM rapides, ${CHALLENGE_SECONDS} secondes chacun.`, `${n} quick multiple-choice questions, ${CHALLENGE_SECONDS} seconds each.`));
     this.abort = new AbortController();
     let questions: QuizQuestion[];
     try {
@@ -819,7 +836,7 @@ export class MentorView extends ItemView {
       });
       questions = (r.questions ?? []).filter(q => q.type === 'mcq' && q.options?.length && typeof q.correct === 'number');
     } catch (e) { w.fail((e as Error).message, () => void this.challenge(topic, sources, focus)); return; }
-    if (!questions.length) { w.fail('Aucune question reçue.', () => void this.challenge(topic, sources, focus)); return; }
+    if (!questions.length) { w.fail(tr('Aucune question reçue.', 'No questions came back.'), () => void this.challenge(topic, sources, focus)); return; }
     w.done();
 
     const dots = bar.createDiv({ cls: 'mentor-dots' });
@@ -831,9 +848,9 @@ export class MentorView extends ItemView {
     // Generation takes a while: the learner may have looked away, so the clock only starts on their signal.
     const ready = stage.createDiv({ cls: 'mentor-countdown mentor-enter' });
     core(ready, 'idle', 72);
-    ready.createDiv({ cls: 'mentor-waiting-title', text: `${questions.length} questions prêtes` });
-    ready.createDiv({ cls: 'mentor-dim', text: `${CHALLENGE_SECONDS} secondes par question. Plus tu réponds vite, plus tu marques. Touches A, B, C, D.` });
-    const go = this.btn(ready, 'C’est parti', { icon: 'play', kind: 'primary', onClick: () => countdown() });
+    ready.createDiv({ cls: 'mentor-waiting-title', text: `${questions.length} ${tr('questions prêtes', 'questions ready')}` });
+    ready.createDiv({ cls: 'mentor-dim', text: tr(`${CHALLENGE_SECONDS} secondes par question. Plus tu réponds vite, plus tu marques. Touches A, B, C, D.`, `${CHALLENGE_SECONDS} seconds per question. The faster you answer, the more you score. Keys A, B, C, D.`) });
+    const go = this.btn(ready, tr('C’est parti', 'Let’s go'), { icon: 'play', kind: 'primary', onClick: () => countdown() });
     window.setTimeout(() => go.focus(), 50);
 
     const countdown = () => {
@@ -859,12 +876,12 @@ export class MentorView extends ItemView {
       const timeBar = card.createDiv({ cls: 'mentor-timer' });
       const timeFill = timeBar.createDiv({ cls: 'mentor-timer-fill' });
       const secs = card.createDiv({ cls: 'mentor-timer-s', text: String(CHALLENGE_SECONDS) });
-      card.createDiv({ cls: 'mentor-q-meta', text: `Question ${i + 1} sur ${questions.length} · ${q.concept}` });
+      card.createDiv({ cls: 'mentor-q-meta', text: `Question ${i + 1} ${tr('sur', 'of')} ${questions.length} · ${q.concept}` });
       this.md(card.createDiv({ cls: 'mentor-q-text' }), q.question, q.source);
       const opts = card.createDiv({ cls: 'mentor-options is-grid' });
       const startAt = performance.now();
       let answered = false;
-      timeFill.setCssStyles({ transitionDuration: `${CHALLENGE_SECONDS}s` });
+      timeFill.setCssProps({ '--dur': `${CHALLENGE_SECONDS}s` });
       window.requestAnimationFrame(() => window.requestAnimationFrame(() => timeFill.addClass('is-running')));
       const secTimer = window.setInterval(() => {
         const left = Math.max(0, CHALLENGE_SECONDS - (performance.now() - startAt) / 1000);
@@ -880,7 +897,8 @@ export class MentorView extends ItemView {
         window.clearInterval(secTimer);
         timeFill.removeClass('is-running');
         const elapsed = (performance.now() - startAt) / 1000;
-        timeFill.setCssStyles({ transitionDuration: '0s', transform: `scaleX(${Math.max(0, 1 - elapsed / CHALLENGE_SECONDS)})` });
+        timeFill.addClass('is-stopped');
+        timeFill.setCssProps({ '--left': String(Math.max(0, 1 - elapsed / CHALLENGE_SECONDS)) });
         const ok = k === q.correct;
         opts.querySelectorAll('.mentor-option').forEach((b, idx) => {
           (b as HTMLButtonElement).disabled = true;
@@ -898,9 +916,9 @@ export class MentorView extends ItemView {
         core(cb, state, 36);
         if (ok) burst(cb, s.run >= 3);
         const t = fb.createDiv();
-        t.createDiv({ cls: 'mentor-fb-verdict', text: k < 0 ? 'Temps écoulé' : ok ? `Juste · +${s.gain}` : 'Raté' });
+        t.createDiv({ cls: 'mentor-fb-verdict', text: k < 0 ? tr('Temps écoulé', 'Time’s up') : ok ? `${tr('Juste', 'Right')} · +${s.gain}` : tr('Raté', 'Missed') });
         t.createDiv({ cls: 'mentor-dim', text: q.answer });
-        const nxt = this.btn(fb, i + 1 < questions.length ? 'Suivante' : 'Résultat', { icon: 'arrow-right', kind: 'primary', onClick: () => { i++; show(); } });
+        const nxt = this.btn(fb, i + 1 < questions.length ? tr('Suivante', 'Next') : tr('Résultat', 'Results'), { icon: 'arrow-right', kind: 'primary', onClick: () => { i++; show(); } });
         nxt.focus();
         this.onKeys((e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); nxt.click(); } });
       };
@@ -924,7 +942,7 @@ export class MentorView extends ItemView {
 
   private async challengeEnd(topic: Topic, sources: SourceSet, results: QuizResult[], points: number) {
     const el = this.reset('challenge-end');
-    this.header(el, topic.title, 'Résultat du défi');
+    this.header(el, topic.title, tr('Résultat du défi', 'Challenge results'));
     const right = results.filter(r => r.score >= 1).length;
     const best = topic.bestChallenge ?? 0;
     const record = points > best;
@@ -944,23 +962,23 @@ export class MentorView extends ItemView {
     ring(rbox, right / Math.max(results.length, 1), 96, `${right}/${results.length}`).addClass('is-animated');
     window.setTimeout(() => burst(rbox, record), 500);
     const tt = top.createDiv();
-    tt.createEl('h2', { cls: 'mentor-result-h', text: record ? (best ? 'Nouveau record' : 'Premier record') : 'Défi terminé' });
+    tt.createEl('h2', { cls: 'mentor-result-h', text: record ? (best ? tr('Nouveau record', 'New best') : tr('Premier record', 'First best score')) : tr('Défi terminé', 'Challenge complete') });
     const pts = tt.createDiv({ cls: 'mentor-result-pts' });
     const v = pts.createSpan({ text: '0' });
     pts.createSpan({ cls: 'mentor-dim', text: ' points' });
     countTo(v, 0, points, 1200);
-    tt.createDiv({ cls: 'mentor-dim', text: record && best ? `Ancien record : ${best}.` : !record ? `Ton record : ${best}.` : 'Refais-le dans quelques jours pour voir si ça tient.' });
-    if (missed.length) tt.createDiv({ cls: 'mentor-dim', text: `${plural(missed.length, 'question ratée ajoutée', 'questions ratées ajoutées')} à tes fiches.` });
+    tt.createDiv({ cls: 'mentor-dim', text: record && best ? `${tr('Ancien record : ', 'Previous best: ')}${best}.` : !record ? `${tr('Ton record : ', 'Your best: ')}${best}.` : tr('Refais-le dans quelques jours pour voir si ça tient.', 'Try again in a few days to see if it sticks.') });
+    if (missed.length) tt.createDiv({ cls: 'mentor-dim', text: `${plural(missed.length, tr('question ratée ajoutée', 'missed question added'), tr('questions ratées ajoutées', 'missed questions added'))} ${tr('à tes fiches.', 'to your cards.')}` });
     const row = el.createDiv({ cls: 'mentor-row' });
-    this.btn(row, 'Rejouer', { icon: 'rotate-ccw', kind: 'primary', onClick: () => void this.challenge(topic, sources, []) });
-    this.btn(row, 'Accueil', { icon: 'home', kind: 'ghost', onClick: () => this.home() });
+    this.btn(row, tr('Rejouer', 'Play again'), { icon: 'rotate-ccw', kind: 'primary', onClick: () => void this.challenge(topic, sources, []) });
+    this.btn(row, tr('Accueil', 'Home'), { icon: 'home', kind: 'ghost', onClick: () => this.home() });
   }
 
   // ================================================================== spaced review
 
   review(topicFilter?: string) {
     const el = this.reset('review');
-    const bar = this.header(el, topicFilter ? this.data.topics[topicFilter]?.title ?? 'Révision' : 'Révision du jour', topicFilter ? 'Révision' : 'Sujets mélangés');
+    const bar = this.header(el, topicFilter ? this.data.topics[topicFilter]?.title ?? tr('Révision', 'Review') : tr('Révision du jour', 'Today’s review'), topicFilter ? tr('Révision', 'Review') : tr('Sujets mélangés', 'Mixed topics'));
     const track = bar.createDiv({ cls: 'mentor-progress' });
     const fill = track.createDiv({ cls: 'mentor-progress-fill' });
     const stage = el.createDiv({ cls: 'mentor-stage' });
@@ -980,20 +998,20 @@ export class MentorView extends ItemView {
         core(cb, done ? 'ok' : 'idle', 64);
         if (done) burst(cb, done >= 10);
         const tt = end.createDiv();
-        tt.createEl('h2', { cls: 'mentor-result-h', text: done ? 'Révision terminée' : 'Rien à revoir pour l’instant' });
+        tt.createEl('h2', { cls: 'mentor-result-h', text: done ? tr('Révision terminée', 'Review complete') : tr('Rien à revoir pour l’instant', 'Nothing to review right now') });
         const nx = nextReview(this.data);
-        tt.createDiv({ cls: 'mentor-dim', text: done ? `${plural(done, 'fiche revue', 'fiches revues')}.${nx ? ` Prochaine révision ${fmtDay(nx.at)}.` : ''} L’espacement fait le reste.` : nx ? `Prochaine révision ${fmtDay(nx.at)}.` : '' });
-        this.btn(stage, 'Accueil', { icon: 'home', kind: 'primary', onClick: () => this.home() });
+        tt.createDiv({ cls: 'mentor-dim', text: done ? `${plural(done, tr('fiche revue', 'card reviewed'), tr('fiches revues', 'cards reviewed'))}.${nx ? ` ${tr('Prochaine révision', 'Next review')} ${fmtDay(nx.at)}.` : ''} ${tr('L’espacement fait le reste.', 'Spacing does the rest.')}` : nx ? `${tr('Prochaine révision', 'Next review')} ${fmtDay(nx.at)}.` : '' });
+        this.btn(stage, tr('Accueil', 'Home'), { icon: 'home', kind: 'primary', onClick: () => this.home() });
         return;
       }
       const topic = this.data.topics[card.topicId];
       const box = stage.createDiv({ cls: 'mentor-panel mentor-flash mentor-enter' });
       box.createDiv({ cls: 'mentor-q-meta', text: [topic?.title, card.concept].filter(Boolean).join(' · ') });
       this.md(box.createDiv({ cls: 'mentor-q-text' }), card.front, card.source);
-      const attempt = box.createEl('textarea', { cls: 'mentor-input', attr: { rows: '2', 'aria-label': 'Ta réponse', placeholder: 'Essaie de répondre de mémoire avant de regarder.' } });
+      const attempt = box.createEl('textarea', { cls: 'mentor-input', attr: { rows: '2', 'aria-label': tr('Ta réponse', 'Your answer'), placeholder: tr('Essaie de répondre de mémoire avant de regarder.', 'Try to answer from memory before looking.') } });
       const row = box.createDiv({ cls: 'mentor-row' });
-      this.btn(row, 'Voir la réponse', { icon: 'eye', kind: 'primary', onClick: () => show() });
-      row.createSpan({ cls: 'mentor-dim', text: 'Entrée' });
+      this.btn(row, tr('Voir la réponse', 'Show answer'), { icon: 'eye', kind: 'primary', onClick: () => show() });
+      row.createSpan({ cls: 'mentor-dim', text: tr('Entrée', 'Enter') });
       window.setTimeout(() => attempt.focus(), 60);
       attempt.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); show(); } });
 
@@ -1006,17 +1024,17 @@ export class MentorView extends ItemView {
         if (!attempt.value.trim()) attempt.addClass('is-empty');
         const ans = box.createDiv({ cls: 'mentor-answer' });
         this.md(ans.createDiv({ cls: 'mentor-prose' }), card.back, card.source);
-        if (card.source) { const s = ans.createDiv({ cls: 'mentor-dim' }); s.createSpan({ text: 'Dans ta note ' }); this.link(s, card.source); }
-        box.createDiv({ cls: 'mentor-dim mentor-grade-q', text: 'Comment ça s’est passé ?' });
+        if (card.source) { const s = ans.createDiv({ cls: 'mentor-dim' }); s.createSpan({ text: tr('Dans ta note ', 'In your note ') }); this.link(s, card.source); }
+        box.createDiv({ cls: 'mentor-dim mentor-grade-q', text: tr('Comment ça s’est passé ?', 'How did it go?') });
         const grades = box.createDiv({ cls: 'mentor-grades' });
         const prev = this.plugin.scheduler.preview(card.fsrs);
         const opts: [FsrsGrade, string, string][] = [
-          [Rating.Again, 'Oublié', '1'], [Rating.Hard, 'Difficile', '2'], [Rating.Good, 'Trouvé', '3'], [Rating.Easy, 'Facile', '4'],
+          [Rating.Again, tr('Oublié', 'Forgot'), '1'], [Rating.Hard, tr('Difficile', 'Hard'), '2'], [Rating.Good, tr('Trouvé', 'Good'), '3'], [Rating.Easy, tr('Facile', 'Easy'), '4'],
         ];
         for (const [g, label, key] of opts) {
           const b = grades.createEl('button', { cls: `mentor-grade g-${g}` });
           b.createDiv({ cls: 'mentor-grade-l', text: label });
-          b.createDiv({ cls: 'mentor-dim', text: `revient dans ${fmtInterval(prev[g])}` });
+          b.createDiv({ cls: 'mentor-dim', text: `${tr('revient dans', 'back in')} ${fmtInterval(prev[g])}` });
           b.createDiv({ cls: 'mentor-key', text: key });
           b.onclick = () => void rate(g);
         }

@@ -309,8 +309,9 @@
 /* timed challenge */
 .mentor-q.is-challenge { padding-top: 22px; }
 .mentor-timer { position: absolute; top: 0; left: 0; right: 0; height: 4px; background: var(--m-line); overflow: hidden; }
-.mentor-timer-fill { height: 100%; background: var(--m-accent); transform-origin: left; transform: scaleX(1); transition-property: transform; transition-timing-function: linear; }
+.mentor-timer-fill { height: 100%; background: var(--m-accent); transform-origin: left; transform: scaleX(1); transition-property: transform; transition-duration: var(--dur, 20s); transition-timing-function: linear; }
 .mentor-timer-fill.is-running { transform: scaleX(0); }
+.mentor-timer-fill.is-stopped { transition-duration: 0s; transform: scaleX(var(--left, 0)); }
 .mentor-timer-s { position: absolute; top: 12px; right: 16px; font-family: var(--m-mono); font-size: 22px; font-variant-numeric: tabular-nums; color: var(--m-accent); }
 .mentor-timer-s.is-low { color: var(--m-warn); animation: m-pulse 1s ease-in-out infinite; }
 .mentor-flash-fb { display: flex; align-items: center; gap: 14px; padding-top: 14px; border-top: 1px solid var(--m-line); animation: m-in 360ms var(--m-ease); }

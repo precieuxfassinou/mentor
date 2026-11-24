@@ -76,7 +76,7 @@ export class Scheduler {
   /** Next interval for each answer, to show on the buttons. */
   preview(card: Card): Record<Grade, Date> {
     const p = this.f.repeat(revive(card), new Date());
-    return { [Rating.Again]: p[Rating.Again].card.due, [Rating.Hard]: p[Rating.Hard].card.due, [Rating.Good]: p[Rating.Good].card.due, [Rating.Easy]: p[Rating.Easy].card.due } as Record<Grade, Date>;
+    return { [Rating.Again]: p[Rating.Again].card.due, [Rating.Hard]: p[Rating.Hard].card.due, [Rating.Good]: p[Rating.Good].card.due, [Rating.Easy]: p[Rating.Easy].card.due };
   }
 
   grade(card: Card, g: Grade): Card { return this.f.next(revive(card), new Date(), g).card; }

@@ -2,6 +2,7 @@ import { execFile, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { tr } from './i18n';
 
 /**
  * Runs the local Claude Code CLI in print mode, with no tools: Mentor passes the notes itself
@@ -70,7 +71,7 @@ export async function detectClaude(): Promise<string | null> {
 function command(cli: string): { cmd: string; pre: string[]; env: NodeJS.ProcessEnv } {
   if (/\.(cmd|bat)$/i.test(cli)) {
     const js = path.join(path.dirname(cli), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
-    if (!fs.existsSync(js)) throw new Error(`Installation npm de Claude Code incomplète : ${js} introuvable.`);
+    if (!fs.existsSync(js)) throw new Error(tr(`Installation npm de Claude Code incomplète : ${js} introuvable.`, `Incomplete npm install of Claude Code: ${js} not found.`));
     return { cmd: process.execPath, pre: [js], env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } };
   }
   return { cmd: cli, pre: [], env: { ...process.env } };
@@ -88,7 +89,7 @@ export class ClaudeRunner {
 
   run(call: ClaudeCall): Promise<ClaudeResult> {
     const { cliPath, model } = this.cfg();
-    if (!cliPath) return Promise.reject(new Error('Claude Code est introuvable. Indique son chemin dans les réglages de Mentor.'));
+    if (!cliPath) return Promise.reject(new Error(tr('Claude Code est introuvable. Indique son chemin dans les réglages de Mentor.', 'Claude Code was not found. Enter its path in Mentor’s settings.')));
     let cmd: { cmd: string; pre: string[]; env: NodeJS.ProcessEnv };
     try { cmd = command(cliPath); } catch (e) { return Promise.reject(e instanceof Error ? e : new Error(String(e))); }
 
@@ -120,8 +121,8 @@ export class ClaudeRunner {
 
       const cleanup = () => { try { fs.unlinkSync(sysFile); } catch { /* already gone */ } };
       const finish = (fn: () => void) => { if (settled) return; settled = true; window.clearTimeout(timer); cleanup(); fn(); };
-      const timer = window.setTimeout(() => { child.kill(); finish(() => reject(new Error('Claude met trop de temps à répondre (6 min). Réessaie.'))); }, TIMEOUT_MS);
-      call.signal?.addEventListener('abort', () => { child.kill(); finish(() => reject(new Error('Annulé.'))); });
+      const timer = window.setTimeout(() => { child.kill(); finish(() => reject(new Error(tr('Claude met trop de temps à répondre (6 min). Réessaie.', 'Claude is taking too long to answer (6 min). Try again.')))); }, TIMEOUT_MS);
+      call.signal?.addEventListener('abort', () => { child.kill(); finish(() => reject(new Error(tr('Annulé.', 'Cancelled.')))); });
 
       const handle = (line: string) => {
         if (!line.trim()) return;
@@ -148,14 +149,14 @@ export class ClaudeRunner {
       });
       child.stderr.setEncoding('utf8');
       child.stderr.on('data', (d: string) => { err = (err + d).slice(-4000); });
-      child.on('error', (e) => finish(() => reject(new Error(`Impossible de lancer Claude Code (${cliPath}) : ${e.message}`))));
+      child.on('error', (e) => finish(() => reject(new Error(tr(`Impossible de lancer Claude Code (${cliPath}) : ${e.message}`, `Could not start Claude Code (${cliPath}): ${e.message}`)))));
       child.on('close', (code) => {
         if (!structured && buf) handle(buf);
         if (structured) {
           const lines = out.split(/\r?\n/).filter(l => l.trim().startsWith('{'));
           for (const l of lines) { try { const m = JSON.parse(l) as StreamLine; if (m.type === 'result') final = m; } catch { /* not JSON */ } }
         }
-        const res = final as StreamLine | null;
+        const res: StreamLine | null = final;
         if (res && !res.is_error) {
           return finish(() => resolve({ text: res.result ?? full, structured: res.structured_output }));
         }
@@ -174,13 +175,13 @@ export class ClaudeRunner {
     if (r.structured && typeof r.structured === 'object') return r.structured as T;
     const m = r.text.match(/\{[\s\S]*\}/);
     if (m) { try { return JSON.parse(m[0]) as T; } catch { /* fall through */ } }
-    throw new Error('Réponse de Claude illisible. Réessaie.');
+    throw new Error(tr('Réponse de Claude illisible. Réessaie.', 'Unreadable answer from Claude. Try again.'));
   }
 }
 
 function friendly(reason: string): string {
-  if (/auth|login|log in|credential|401/i.test(reason)) return 'Claude Code n’est pas connecté. Ouvre un terminal, lance « claude » et connecte-toi, puis réessaie.';
-  if (/rate|limit|429|usage/i.test(reason)) return `Limite d’utilisation atteinte : ${reason}`;
-  if (/ENOTFOUND|ECONN|network|fetch failed|timed out/i.test(reason)) return 'Pas de connexion à Claude (réseau). Vérifie Internet et réessaie.';
+  if (/auth|login|log in|credential|401/i.test(reason)) return tr('Claude Code n’est pas connecté. Ouvre un terminal, lance « claude » et connecte-toi, puis réessaie.', 'Claude Code is not signed in. Open a terminal, run “claude” and sign in, then try again.');
+  if (/rate|limit|429|usage/i.test(reason)) return `${tr('Limite d’utilisation atteinte : ', 'Usage limit reached: ')}${reason}`;
+  if (/ENOTFOUND|ECONN|network|fetch failed|timed out/i.test(reason)) return tr('Pas de connexion à Claude (réseau). Vérifie Internet et réessaie.', 'Cannot reach Claude (network). Check your connection and try again.');
   return `Claude Code : ${reason}`;
 }

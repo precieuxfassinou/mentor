@@ -1,4 +1,5 @@
 import { App, TFile, TFolder, getLinkpath } from 'obsidian';
+import { locale, tr } from './i18n';
 
 /** The notes Mentor gives to Claude for one subject. */
 export interface SourceSet {
@@ -14,7 +15,8 @@ const strip = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerC
 
 const STOP = new Set(('le la les un une des de du d l et ou en au aux a à est sont pour par sur dans que qui quoi comment '
   + 'pourquoi ce cette ces son sa ses mon ma mes ton ta tes the of and or to in is are what how why with sans avec je tu il nous vous '
-  + 'explique expliquer apprendre comprendre cours notion notions difference entre').split(' ').map(strip));
+  + 'explique expliquer apprendre comprendre cours notion notions difference entre '
+  + 'a an on at by for from as be it its this that these those do does was were explain learn understand between versus vs').split(' ').map(strip));
 
 function excluded(path: string, exclude: string[]): boolean {
   return exclude.some(e => e && (path === e || path.startsWith(e.replace(/\/$/, '') + '/')));
@@ -73,7 +75,7 @@ export async function fromFolder(app: App, folder: TFolder, o: SourceOptions): P
     }
   };
   walk(folder);
-  files.sort((a, b) => a.path.localeCompare(b.path, 'fr', { numeric: true }));
+  files.sort((a, b) => a.path.localeCompare(b.path, locale(), { numeric: true }));
   return readAll(app, files, o.budget, folder.name);
 }
 
@@ -106,8 +108,8 @@ export async function fromQuery(app: App, query: string, o: SourceOptions): Prom
 
 /** Block given to Claude: every note with its path, so it can cite it. */
 export function formatSources(set: SourceSet): string {
-  if (!set.files.length) return '(Aucune note trouvée dans le vault pour ce sujet.)';
-  const parts = set.files.map(f => `<note path="${f.path}"${f.truncated ? ' tronquée="oui"' : ''}>\n${f.text}\n</note>`);
-  if (set.left.length) parts.push(`(Notes liées non incluses faute de place : ${set.left.slice(0, 20).join(', ')})`);
+  if (!set.files.length) return tr('(Aucune note trouvée dans le vault pour ce sujet.)', '(No note found in the vault for this topic.)');
+  const parts = set.files.map(f => `<note path="${f.path}"${f.truncated ? ' truncated="yes"' : ''}>\n${f.text}\n</note>`);
+  if (set.left.length) parts.push(`${tr('(Notes liées non incluses faute de place : ', '(Linked notes left out for lack of room: ')}${set.left.slice(0, 20).join(', ')})`);
   return parts.join('\n\n');
 }
