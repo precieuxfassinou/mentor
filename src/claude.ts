@@ -1,5 +1,4 @@
 import { execFile, spawn } from 'child_process';
-import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { tr } from './i18n';
@@ -54,35 +53,40 @@ export function candidatePaths(): string[] {
   ];
 }
 
-/** Finds the claude executable: known install locations first, then the system PATH. */
-export async function detectClaude(): Promise<string | null> {
-  for (const p of candidatePaths()) if (fs.existsSync(p)) return p;
-  const finder = process.platform === 'win32' ? 'where' : 'which';
-  return new Promise((resolve) => {
-    execFile(finder, ['claude'], { timeout: 5000, windowsHide: true }, (err, out) => {
-      if (err) return resolve(null);
-      const first = String(out).split(/\r?\n/).map(s => s.trim()).find(Boolean);
-      resolve(first && fs.existsSync(first) ? first : null);
-    });
-  });
-}
+type Cmd = { cmd: string; pre: string[]; env: NodeJS.ProcessEnv };
 
 /** An npm install leaves a .cmd shim: run its cli.js with Obsidian's own Node instead of going through cmd.exe. */
-function command(cli: string): { cmd: string; pre: string[]; env: NodeJS.ProcessEnv } {
+function command(cli: string): Cmd {
   if (/\.(cmd|bat)$/i.test(cli)) {
     const js = path.join(path.dirname(cli), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
-    if (!fs.existsSync(js)) throw new Error(tr(`Installation npm de Claude Code incomplète : ${js} introuvable.`, `Incomplete npm install of Claude Code: ${js} not found.`));
     return { cmd: process.execPath, pre: [js], env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } };
   }
   return { cmd: cli, pre: [], env: { ...process.env } };
 }
 
-function workDir(): string {
-  // Neutral working directory: no CLAUDE.md or project settings from the vault get loaded.
-  const dir = path.join(os.tmpdir(), 'obsidian-mentor');
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
+/** True when this path runs Claude Code (`claude --version` answers). No direct file access needed. */
+function works(cli: string): Promise<boolean> {
+  const c = command(cli);
+  return new Promise((resolve) => {
+    execFile(c.cmd, [...c.pre, '--version'], { env: c.env, timeout: 15000, windowsHide: true }, (err) => resolve(!err));
+  });
 }
+
+/** Finds the claude executable: known install locations first, then the system PATH. */
+export async function detectClaude(): Promise<string | null> {
+  for (const p of candidatePaths()) if (await works(p)) return p;
+  const finder = process.platform === 'win32' ? 'where' : 'which';
+  const found = await new Promise<string[]>((resolve) => {
+    execFile(finder, ['claude'], { timeout: 5000, windowsHide: true }, (err, out) => {
+      resolve(err ? [] : String(out).split(/\r?\n/).map(x => x.trim()).filter(Boolean));
+    });
+  });
+  for (const p of found) if (await works(p)) return p;
+  return null;
+}
+
+/** Fixed short system prompt; Mentor's full instructions travel in the message (stdin), so no temporary file is written. */
+const ROLE = 'You are Mentor, a study tutor inside Obsidian. The message starts with your complete instructions inside <instructions> tags, followed by the task. Follow those instructions exactly; never mention the tags.';
 
 export class ClaudeRunner {
   constructor(private cfg: () => { cliPath: string; model: string }) {}
@@ -90,19 +94,16 @@ export class ClaudeRunner {
   run(call: ClaudeCall): Promise<ClaudeResult> {
     const { cliPath, model } = this.cfg();
     if (!cliPath) return Promise.reject(new Error(tr('Claude Code est introuvable. Indique son chemin dans les réglages de Mentor.', 'Claude Code was not found. Enter its path in Mentor’s settings.')));
-    let cmd: { cmd: string; pre: string[]; env: NodeJS.ProcessEnv };
-    try { cmd = command(cliPath); } catch (e) { return Promise.reject(e instanceof Error ? e : new Error(String(e))); }
-
-    const dir = workDir();
-    const sysFile = path.join(dir, `system-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.md`);
-    fs.writeFileSync(sysFile, call.system, 'utf8');
+    const cmd = command(cliPath);
+    // Neutral working directory: no CLAUDE.md or project settings from the vault get loaded.
+    const dir = os.tmpdir();
 
     const structured = !!call.schema;
     const args = [
       ...cmd.pre, '-p',
       '--output-format', structured ? 'json' : 'stream-json',
       ...(structured ? ['--json-schema', JSON.stringify(call.schema)] : ['--verbose', '--include-partial-messages']),
-      '--system-prompt-file', sysFile,
+      '--system-prompt', ROLE,
       '--tools', '',
       '--model', call.model || model || 'sonnet',
       '--no-session-persistence',
@@ -119,8 +120,7 @@ export class ClaudeRunner {
       let final: StreamLine | null = null;
       let settled = false;
 
-      const cleanup = () => { try { fs.unlinkSync(sysFile); } catch { /* already gone */ } };
-      const finish = (fn: () => void) => { if (settled) return; settled = true; window.clearTimeout(timer); cleanup(); fn(); };
+      const finish = (fn: () => void) => { if (settled) return; settled = true; window.clearTimeout(timer); fn(); };
       const timer = window.setTimeout(() => { child.kill(); finish(() => reject(new Error(tr('Claude met trop de temps à répondre (6 min). Réessaie.', 'Claude is taking too long to answer (6 min). Try again.')))); }, TIMEOUT_MS);
       call.signal?.addEventListener('abort', () => { child.kill(); finish(() => reject(new Error(tr('Annulé.', 'Cancelled.')))); });
 
@@ -165,7 +165,7 @@ export class ClaudeRunner {
       });
 
       child.stdin.on('error', () => { /* process ended early: reported by close */ });
-      child.stdin.end(call.prompt, 'utf8');
+      child.stdin.end(`<instructions>\n${call.system}\n</instructions>\n\n${call.prompt}`, 'utf8');
     });
   }
 

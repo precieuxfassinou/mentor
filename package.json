@@ -1,6 +1,6 @@
 {
   "name": "mentor",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Personal tutor for an Obsidian vault: guided lessons, quizzes and spaced review",
   "scripts": {
     "build": "node build.mjs",

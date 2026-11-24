@@ -30,7 +30,7 @@ Desktop only (Windows, macOS, Linux).
 
 - **Account and payment.** Claude Code needs your own Anthropic account: a paid Claude plan (Pro, Max, Team…) or a Claude Console account billed by usage. Mentor's usage is billed to that account under your own agreement with Anthropic. Mentor never sees, stores or asks for your credentials; sign-in happens in Claude Code itself.
 - **Network use.** To build a lesson or a quiz, Mentor sends the text of the notes you selected (up to the size set in the settings) and your answers to Claude Code, which sends them to Anthropic's servers. Nothing is sent until you start a lesson, a quiz, a challenge or a test. Mentor itself has no server and no telemetry.
-- **Files outside the vault.** Mentor runs the `claude` program installed on your computer: it looks for it in its usual install folders and on your system path, or uses the path you enter. For each request it writes a temporary instruction file in your system's temporary folder (`obsidian-mentor`) and deletes it right after. Claude Code runs there with no tools, so it cannot read or change your files.
+- **Runs a program on your computer.** Mentor starts the `claude` program installed on your computer (found in its usual install folders or on your system path, or the path you enter). Your notes and instructions are passed to it directly, without writing any file. It runs from your system's temporary folder with no tools, so Claude Code cannot read or change your files. Mentor itself only reads and writes inside your vault, through Obsidian.
 - Your progress (topics, cards, review history) is stored in the plugin's `data.json` in your vault.
 
 Mentor is an independent project. It is not made, endorsed or supported by Anthropic.
