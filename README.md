@@ -2,7 +2,7 @@
 
 A personal tutor for your Obsidian vault. Mentor reads the notes you choose and turns them into a guided lesson, a quiz, a timed challenge and spaced-repetition cards, using the study methods that research ranks as the most effective.
 
-![Mentor home screen](docs/screenshot.png)
+![A quiz answer graded by Mentor](docs/screenshot.png)
 
 ## What it does
 
